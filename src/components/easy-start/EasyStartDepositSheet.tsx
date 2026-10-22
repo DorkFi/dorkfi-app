@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  getWalletAccounts,
+  refreshAuth,
+  refreshUser,
+} from "@dynamic-labs-sdk/client";
+import {
   createWaasWalletAccounts,
   getChainsMissingWaasWalletAccounts,
 } from "@dynamic-labs-sdk/client/waas";
@@ -18,6 +23,7 @@ import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useToast } from "@/hooks/use-toast";
+import { dynamicClient } from "@/dynamic/dynamicClient";
 import { deriveAlgorandAddressFromSolana } from "@/lib/easyStart/algorandFromSolana";
 import {
   fetchAlgorandAlgoTotal,
@@ -30,10 +36,7 @@ import { createCoinbaseSession } from "@/lib/easyStart/offrampApi";
 import {
   BANK_DEPOSIT_MIN_GAIN_USDC,
   BANK_DEPOSIT_POLL_MS,
-  bankDepositBaseline,
   clearPendingBankDeposit,
-  readPendingBankDeposit,
-  savePendingBankDeposit,
   type PendingBankDeposit,
 } from "@/lib/easyStart/pendingBankDeposit";
 import {
@@ -90,9 +93,9 @@ interface EasyStartDepositSheetProps {
 }
 
 /**
- * Coinbase Onramp to Base USDC, using the existing CDP session API.
- * Funds stay in the Easy Start Base wallet until Deposit to Earn
- * (Exodus XO Swap + supply).
+ * Bank deposits buy ALGO on Algorand through Coinbase. Coinbase balance
+ * and another wallet fund that same Algorand account. An existing Base
+ * USDC balance can still be spent from this sheet.
  */
 export function EasyStartDepositSheet({
   open,
@@ -149,7 +152,11 @@ export function EasyStartDepositSheet({
   const algoBalanceQuery = useQuery({
     queryKey: ["easy-start-algo-total", algorandAddress],
     queryFn: () => fetchAlgorandAlgoTotal(algorandAddress!),
-    enabled: Boolean(open && algorandAddress && cryptoMethod),
+    enabled: Boolean(
+      open &&
+        algorandAddress &&
+        (cryptoMethod || method === "coinbase" || algoWaiting)
+    ),
     refetchInterval: algoWaiting ? 4_000 : false,
   });
 
@@ -228,9 +235,12 @@ export function EasyStartDepositSheet({
     if (!next) {
       if (phase === "awaiting_coinbase") {
         toast({
-          title: "Still watching for your deposit",
-          description:
-            "You can close this. We’ll let you know when the money arrives.",
+          title: algoWaiting
+            ? "Finish the Coinbase purchase"
+            : "Still watching for your deposit",
+          description: algoWaiting
+            ? "Reopen Deposit to see when the ALGO arrives."
+            : "You can close this. We’ll let you know when the money arrives.",
         });
       } else if (phase === "success" || phase === "gas") {
         settleBankDeposit();
@@ -287,6 +297,7 @@ export function EasyStartDepositSheet({
   ]);
 
   useEffect(() => {
+    if (algoWaiting) return;
     if (bankDepositArrived && phase === "funding") {
       noteArrival();
       return;
@@ -296,10 +307,77 @@ export function EasyStartDepositSheet({
     if (gained < BANK_DEPOSIT_MIN_GAIN_USDC) return;
     setPhase("funding");
     noteArrival();
-  }, [bankDepositArrived, baseUsdcNum, noteArrival, phase]);
+  }, [algoWaiting, bankDepositArrived, baseUsdcNum, noteArrival, phase]);
+
+  const readSolanaAddress = () => {
+    if (solanaAddress) return solanaAddress;
+    const listed = getWalletAccounts().find((account) => account.chain === "SOL")
+      ?.address;
+    if (listed) return listed;
+    const credentials = dynamicClient?.user?.verifiedCredentials;
+    if (!Array.isArray(credentials)) return null;
+    for (const credential of credentials) {
+      if (!credential || typeof credential !== "object") continue;
+      const chain = String(
+        "chain" in credential ? credential.chain ?? "" : ""
+      ).toLowerCase();
+      const address =
+        "address" in credential && typeof credential.address === "string"
+          ? credential.address
+          : "";
+      if ((chain === "solana" || chain === "sol") && address) return address;
+    }
+    return null;
+  };
+
+  const walletFromSolana = (address: string) => ({
+    solanaAddress: address,
+    algorandAddress: deriveAlgorandAddressFromSolana(address),
+  });
+
+  const ensureAlgorandWallet = async () => {
+    const existing = readSolanaAddress();
+    if (existing) return walletFromSolana(existing);
+
+    const missing = getChainsMissingWaasWalletAccounts();
+    if (missing.includes("SOL")) {
+      setOpeningCrypto("wallet");
+      try {
+        await createWaasWalletAccounts({ chains: ["SOL"] });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!/multiple wallets/i.test(message)) throw err;
+      } finally {
+        setOpeningCrypto(null);
+      }
+    }
+
+    try {
+      await refreshUser();
+    } catch {
+      // The wallet may already be in local state.
+    }
+    const refreshed = readSolanaAddress();
+    if (refreshed) return walletFromSolana(refreshed);
+    throw new Error(
+      missing.includes("SOL")
+        ? "Algorand wallet is still loading. Tap the payment button again."
+        : "Solana embedded wallets are not enabled in this Dynamic environment."
+    );
+  };
+
+  const freshAccessToken = async () => {
+    try {
+      await refreshAuth();
+    } catch {
+      // Keep the current token if refresh fails.
+    }
+    const token = dynamicClient?.token ?? (await getAccessToken?.());
+    if (!token) throw new Error("Sign in to add money with Coinbase.");
+    return token;
+  };
 
   const handleCoinbaseOnramp = async () => {
-    if (!address) return;
     setError(null);
     setPopupBlocked(false);
     if (!getAccessToken) {
@@ -307,48 +385,38 @@ export function EasyStartDepositSheet({
       setPhase("error");
       return;
     }
-    setPhase("funding");
     try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error("Sign in to add money with Coinbase.");
-      }
-      const baseline = bankDepositBaseline({
-        existing: readPendingBankDeposit(address),
-        currentUsdc: baseUsdcNum,
-      });
-      usdcBeforeRef.current = baseline;
+      const wallet = await ensureAlgorandWallet();
+      setPhase("funding");
+      const accessToken = await freshAccessToken();
+      setAlgoBaseline(algoBalanceQuery.data?.totalMicro ?? 0n);
+      setAlgoWaiting(true);
       const session = await createCoinbaseSession({
-        address,
+        address: wallet.algorandAddress,
+        solanaAddress: wallet.solanaAddress,
         accessToken,
         amount,
+        destination: "algorand",
       });
       if (!session.buyUrl) {
-        throw new Error("Coinbase Onramp URL missing. Redeploy the API.");
+        throw new Error("Coinbase Onramp URL missing. Restart the dev server.");
       }
-      savePendingBankDeposit({
-        address,
-        amount,
-        usdcBefore: baseline,
-        partnerUserRef: session.partnerUserRef,
-      });
       const popup = window.open(
         session.buyUrl,
         "_blank",
         "noopener,noreferrer"
       );
-      // Browsers often return null even when the tab opened (especially with
-      // noopener). Treat a missing handle as waiting, not a failed deposit.
       const opened = Boolean(popup);
       setPopupBlocked(!opened);
       setPhase("awaiting_coinbase");
       toast({
-        title: "Finish your bank deposit",
+        title: "Finish your bank purchase",
         description: opened
-          ? "Complete the transfer in the new tab. We’ll detect the funds automatically."
+          ? "Complete the ALGO purchase in the new tab. We’ll detect it automatically."
           : "If a new tab didn’t open, tap Reopen bank deposit.",
       });
     } catch (e: unknown) {
+      setAlgoWaiting(false);
       const message = e instanceof Error ? e.message : String(e);
       setError(message || "Couldn’t open Coinbase Onramp");
       setPhase("error");
@@ -357,6 +425,25 @@ export function EasyStartDepositSheet({
         description: message,
         variant: "destructive",
       });
+    }
+  };
+
+  const checkAlgoArrived = async () => {
+    if (!algorandAddress) return;
+    setError(null);
+    try {
+      const bal = await fetchAlgorandAlgoTotal(algorandAddress);
+      const base = algoBaseline ?? 0n;
+      if (bal.totalMicro >= base + ACCOUNT_OPEN_MICRO) {
+        setFundedWithAlgo(true);
+        setPhase("success");
+        return;
+      }
+      setError(
+        "ALGO hasn’t arrived yet. Finish the Coinbase purchase, then try again."
+      );
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -381,10 +468,10 @@ export function EasyStartDepositSheet({
   };
 
   const handleDeposit = async () => {
-    if (!address) return;
     setError(null);
 
     if (skipFiat) {
+      if (!address) return;
       if (!hasUsdcOnBase) {
         setError(
           consumerCopy
@@ -402,33 +489,13 @@ export function EasyStartDepositSheet({
     await handleCoinbaseOnramp();
   };
 
-  const ensureAlgorandWallet = async () => {
-    if (algorandAddress && solanaAddress) {
-      return { algorandAddress, solanaAddress };
-    }
-    const missing = getChainsMissingWaasWalletAccounts();
-    if (!missing.includes("SOL")) {
-      throw new Error(
-        "Solana embedded wallets are not enabled in this Dynamic environment."
-      );
-    }
-    setOpeningCrypto("wallet");
-    await createWaasWalletAccounts({ chains: ["SOL"] });
-    return null;
-  };
-
   const openCoinbaseTransfer = async () => {
     if (!getAccessToken) return;
     setError(null);
     try {
       const wallet = await ensureAlgorandWallet();
-      if (!wallet) {
-        setError("Algorand wallet created. Tap Transfer from Coinbase again.");
-        return;
-      }
       setOpeningCrypto("send");
-      const accessToken = await getAccessToken();
-      if (!accessToken) throw new Error("Sign in to open Coinbase.");
+      const accessToken = await freshAccessToken();
       setAlgoBaseline(algoBalanceQuery.data?.totalMicro ?? 0n);
       setAlgoWaiting(true);
       const session = await createCoinbaseSession({
@@ -453,10 +520,6 @@ export function EasyStartDepositSheet({
     setError(null);
     try {
       const wallet = await ensureAlgorandWallet();
-      if (!wallet) {
-        setError("Algorand wallet created. Tap Copy address again.");
-        return;
-      }
       await navigator.clipboard.writeText(wallet.algorandAddress);
       setCopiedAlgo(true);
       setAlgoBaseline(algoBalanceQuery.data?.totalMicro ?? 0n);
@@ -488,7 +551,7 @@ export function EasyStartDepositSheet({
       {
         id: "coinbase",
         title: "Bank Deposits",
-        description: "Transfer from your bank account",
+        description: "Buy ALGO with your bank",
         icon: <Landmark className="h-5 w-5" />,
         badge: "Lowest Fees",
       },
@@ -532,9 +595,12 @@ export function EasyStartDepositSheet({
           : `Continue with ${amountDisplay}`;
 
   const busy = phase === "funding" || openingCrypto != null;
-  const canContinue = cryptoMethod
-    ? !busy
-    : Boolean(address) && amountValid && !busy;
+  const canContinue =
+    method === "coinbase"
+      ? amountValid && !busy
+      : cryptoMethod
+        ? !busy
+        : Boolean(address) && amountValid && !busy;
 
   const goReview = () => {
     setError(null);
@@ -607,7 +673,8 @@ export function EasyStartDepositSheet({
                   </p>
                 ) : null}
                 <p className="text-sm text-muted-foreground text-center">
-                  We’ll detect the funds automatically.
+                  We’ll detect the ALGO automatically. 0.1 ALGO stays in the
+                  account so it can remain open.
                 </p>
                 {popupBlocked ? (
                   <p className="text-sm text-muted-foreground text-center">
@@ -622,7 +689,9 @@ export function EasyStartDepositSheet({
                 <Button
                   variant="ghost"
                   className="w-full"
-                  onClick={() => void ensureGasThenFinish()}
+                  onClick={() =>
+                    void (algoWaiting ? checkAlgoArrived() : ensureGasThenFinish())
+                  }
                 >
                   I already deposited
                 </Button>
@@ -718,14 +787,21 @@ export function EasyStartDepositSheet({
                   receiveLabel="You'll add"
                   receiveValue={amountDisplay}
                   footnote={
-                    consumerCopy
-                      ? "This will be added to your SimplFi balance"
-                      : "This will be added to your Base wallet"
+                    method === "coinbase"
+                      ? "Coinbase buys ALGO and sends it to your Algorand account. 0.1 ALGO stays in the account so it can remain open."
+                      : consumerCopy
+                        ? "This will be added to your SimplFi balance"
+                        : "This will be added to your Base wallet"
                   }
                 />
                 <TrustValueList />
                 <TermsNote />
-                {!address ? (
+                {error ? (
+                  <p className="text-sm text-destructive" role="alert">
+                    {error}
+                  </p>
+                ) : null}
+                {method === "balance" && !address ? (
                   <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
                     Waiting for your account…
                   </p>
@@ -753,7 +829,9 @@ export function EasyStartDepositSheet({
                 subtitle={
                   cryptoMethod
                     ? "Send ALGO to your Algorand account."
-                    : "Transfer from your bank with Coinbase."
+                    : method === "balance"
+                      ? "Use the balance already in your account."
+                      : "Buy ALGO with your bank through Coinbase."
                 }
               />
               <div className="px-6 pb-6 pt-3 space-y-5">
@@ -819,7 +897,7 @@ export function EasyStartDepositSheet({
                   </p>
                 ) : null}
 
-                {!cryptoMethod && !address ? (
+                {method === "balance" && !address ? (
                   <p className="text-sm text-amber-600 dark:text-amber-400">
                     Waiting for your account…
                   </p>
@@ -834,12 +912,12 @@ export function EasyStartDepositSheet({
                         : `You'll add ${amountDisplay}`
                   }
                   feeLabel={
-                    cryptoMethod
+                    cryptoMethod || method === "coinbase"
                       ? "0.1 ALGO stays locked to open the account"
                       : "Fee shown at checkout"
                   }
                   receiveLabel={
-                    cryptoMethod
+                    cryptoMethod || method === "coinbase"
                       ? "Added to your Algorand account"
                       : consumerCopy
                         ? "Added to your SimplFi balance"

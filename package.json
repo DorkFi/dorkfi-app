@@ -29,6 +29,7 @@
     "@dynamic-labs-sdk/client": "^1.38.2",
     "@dynamic-labs-sdk/evm": "^1.38.2",
     "@dynamic-labs-sdk/react-hooks": "^1.38.2",
+    "@dynamic-labs-sdk/solana": "^1.38.2",
     "@folks-finance/algorand-sdk": "^0.2.4",
     "@hono/node-server": "^2.0.12",
     "@hookform/resolvers": "^3.9.0",

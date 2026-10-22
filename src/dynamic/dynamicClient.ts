@@ -1,5 +1,6 @@
 import { createDynamicClient } from "@dynamic-labs-sdk/client";
 import { addEvmExtension } from "@dynamic-labs-sdk/evm";
+import { addSolanaExtension } from "@dynamic-labs-sdk/solana";
 
 const environmentId = (import.meta.env.VITE_DYNAMIC_ENVIRONMENT_ID ?? "").trim();
 
@@ -14,8 +15,9 @@ function appOrigin(): string {
 export const dynamicEnvironmentId = environmentId;
 
 /**
- * Module singleton. Importing this file registers the EVM extension before
- * any Dynamic hook runs.
+ * Module singleton. Importing this file registers the EVM and Solana
+ * extensions before any Dynamic hook runs. Solana is required so an existing
+ * Solana embedded wallet (the key behind the Algorand address) can be listed.
  */
 export const dynamicClient = environmentId
   ? createDynamicClient({
@@ -29,4 +31,5 @@ export const dynamicClient = environmentId
 
 if (dynamicClient) {
   addEvmExtension();
+  addSolanaExtension();
 }

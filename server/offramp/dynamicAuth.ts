@@ -53,6 +53,30 @@ export function collectCredentialValues(value: unknown): Set<string> {
   return found;
 }
 
+/**
+ * Dynamic's access token often omits embedded Solana addresses. The
+ * authenticated user profile, fetched with that same token, lists them.
+ */
+export async function fetchDynamicUserCredentialValues(
+  token: string,
+  environmentId: string
+): Promise<Set<string>> {
+  const url = `https://app.dynamicauth.com/api/v0/sdk/${encodeURIComponent(environmentId)}/users`;
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    throw new AuthError(
+      403,
+      "Could not confirm the Solana wallet on this session."
+    );
+  }
+  return collectCredentialValues(await res.json());
+}
+
 function b64urlJson(part: string): Record<string, unknown> {
   const json = Buffer.from(part, "base64url").toString("utf8");
   return JSON.parse(json) as Record<string, unknown>;

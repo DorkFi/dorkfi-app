@@ -106,6 +106,13 @@ export default defineConfig(({ mode }) => {
     alias: {
       "@": path.resolve(__dirname, "./src"),
       buffer: "buffer",
+      // The Dynamic Solana SDK and the app resolve different copies of this
+      // package. Vite then bundles both, and Solana's layout `instanceof`
+      // checks throw while the SDK is loading.
+      "@solana/buffer-layout": path.resolve(
+        __dirname,
+        "node_modules/@solana/buffer-layout"
+      ),
     },
     dedupe: [
       "react",

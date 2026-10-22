@@ -10,8 +10,9 @@
  */
 import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { AuthError } from "./privyAuth.js";
+import { AuthError, bearerToken } from "./privyAuth.js";
 import { requireEasyStartAuth } from "./sessionAuth.ts";
+import { fetchDynamicUserCredentialValues } from "./dynamicAuth.ts";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
@@ -171,10 +172,26 @@ export async function handleCoinbaseSession(
         return;
       }
       try {
+        let credentialValues = session.credentialValues;
+        const solanaAddress = body.solanaAddress?.trim() ?? "";
+        if (solanaAddress && !credentialValues.has(solanaAddress)) {
+          const token = bearerToken(req);
+          if (!token || !env.dynamicEnvironmentId) {
+            sendJson(res, 403, {
+              error: "Could not confirm the Solana wallet on this session.",
+            });
+            return;
+          }
+          const fromProfile = await fetchDynamicUserCredentialValues(
+            token,
+            env.dynamicEnvironmentId
+          );
+          credentialValues = new Set([...credentialValues, ...fromProfile]);
+        }
         const bound = assertSolanaOwnsAlgorandAddress({
-          solanaAddress: body.solanaAddress ?? "",
+          solanaAddress,
           algorandAddress: address,
-          credentialValues: session.credentialValues,
+          credentialValues,
         });
         address = bound.algorandAddress;
       } catch (error) {
