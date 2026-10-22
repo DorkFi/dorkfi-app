@@ -318,6 +318,15 @@ interface SupplyBorrowModalProps {
   } | null;
   userBorrowBalance?: number;
   onTransactionSuccess?: () => void;
+  /**
+   * Fired as soon as a supply or borrow confirms, before the API snapshot
+   * refresh. Portfolio uses this to paint the market from algod.
+   */
+  onChainPositionConfirmed?: (scope: {
+    network: string;
+    poolId: string;
+    marketId: string;
+  }) => void;
   onRefreshWalletBalance?: () => void;
   /** Refetch wallet / market balances when the user picks a different deposit route (e.g. fALGO vs ALGO). */
   onDepositRouteChange?: () => void | Promise<void>;
@@ -367,6 +376,7 @@ const SupplyBorrowModal = ({
   userGlobalData,
   userBorrowBalance = 0,
   onTransactionSuccess,
+  onChainPositionConfirmed,
   onRefreshWalletBalance,
   onDepositRouteChange,
   availableAssets,
@@ -2150,6 +2160,11 @@ const SupplyBorrowModal = ({
       invalidateUserPositionRpcCache(apiNet, activeAccount.address);
       rememberPortfolioChainRefresh({
         address: activeAccount.address,
+        network: apiNet,
+        poolId: pending.poolAppId,
+        marketId: pending.marketContractId,
+      });
+      onChainPositionConfirmed?.({
         network: apiNet,
         poolId: pending.poolAppId,
         marketId: pending.marketContractId,

@@ -2198,6 +2198,13 @@ const PortfolioModals = ({
                     )
                 : undefined
             }
+            onChainPositionConfirmed={(scope) => {
+              refreshPositionFromChain(
+                scope.network,
+                scope.poolId,
+                scope.marketId
+              );
+            }}
             onTransactionSuccess={async () => {
               // Refresh wallet balance immediately after successful transaction
               if (depositModal.asset && onRefreshWalletBalance) {
@@ -2562,6 +2569,13 @@ const PortfolioModals = ({
             userBorrowBalance={userBorrowBalance || 0}
             isLoadingBorrowGlobalData={isLoadingBorrowGlobalData}
             poolCollateralMarkets={borrowPoolCollateralMarkets}
+            onChainPositionConfirmed={(scope) => {
+              refreshPositionFromChain(
+                scope.network,
+                scope.poolId,
+                scope.marketId
+              );
+            }}
             onTransactionSuccess={() => {
               refreshPositionFromChain(
                 borrowModal.network || currentNetwork,

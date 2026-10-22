@@ -34,6 +34,7 @@ import {
   fetchMarketInfo,
   repayOnBehalf,
   liquidateCrossMarket,
+  fetchGlobalUserRowsFromChain,
   fetchUserDataFromChain,
   fetchUserPositionSnapshotFromChain,
   fillMissingUserMarketRowsFromChain,
@@ -116,10 +117,10 @@ import {
 } from "@/utils/portfolioUsdCache";
 import { unionPortfolioPositionRows } from "@/utils/portfolioMissingUserMarkets";
 import {
-  mergeChainPositionIntoApiSnapshot,
+  overlayPendingPortfolioPositions,
+  PORTFOLIO_CHAIN_REFRESH_STORAGE_KEY,
   readPortfolioChainRefresh,
   rememberPortfolioChainRefresh,
-  type PortfolioChainRefreshHint,
   type PortfolioPositionRefreshScope,
 } from "@/utils/portfolioChainRefresh";
 import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
@@ -711,8 +712,12 @@ const Portfolio = () => {
   const fetchUserQueued = useRef(false);
   const fetchUserGeneration = useRef(0);
   const fetchUserAddressRef = useRef<string | null>(null);
-  /** Algod overlay for the market touched by the latest confirmed position tx. */
-  const postTxChainRefreshRef = useRef<PortfolioChainRefreshHint | null>(null);
+  const fetchUserRef = useRef<
+    (
+      userAddress: string,
+      scope?: PortfolioPositionRefreshScope
+    ) => Promise<void>
+  >(async () => {});
 
   // Compute final avatar: prioritize user profile avatar > resolver avatar
   // If neither exists, components will show placeholder
@@ -4045,21 +4050,16 @@ const Portfolio = () => {
     scope?: PortfolioPositionRefreshScope
   ) => {
     if (scope?.network && scope.poolId && scope.marketId) {
-      const hint: PortfolioChainRefreshHint = {
+      rememberPortfolioChainRefresh({
         address: userAddress,
         network: scope.network,
         poolId: String(scope.poolId),
         marketId: String(scope.marketId),
-        until: Date.now() + 60_000,
-      };
-      postTxChainRefreshRef.current = hint;
-      rememberPortfolioChainRefresh(hint);
+      });
       invalidateUserPositionRpcCache(scope.network, userAddress);
     } else {
-      const stored = readPortfolioChainRefresh(userAddress);
-      if (stored) {
-        postTxChainRefreshRef.current = stored;
-        invalidateUserPositionRpcCache(stored.network, userAddress);
+      for (const hint of readPortfolioChainRefresh(userAddress)) {
+        invalidateUserPositionRpcCache(hint.network, userAddress);
       }
     }
 
@@ -4074,6 +4074,27 @@ const Portfolio = () => {
     const isCurrentFetchUser = () =>
       fetchUserGeneration.current === generation &&
       fetchUserAddressRef.current === userAddress;
+
+    const overlayPending = (
+      apiUserData: Record<string, unknown>[],
+      apiGlobalUserData: Record<string, unknown>[]
+    ) =>
+      overlayPendingPortfolioPositions({
+        userAddress,
+        apiUserData,
+        apiGlobalUserData,
+        isCurrent: isCurrentFetchUser,
+        readMarket: async (hint) => {
+          const snap = await fetchUserPositionSnapshotFromChain(
+            userAddress,
+            hint.network as NetworkId,
+            hint.poolId,
+            hint.marketId
+          );
+          return { userRow: snap.userRow, globalRow: snap.globalRow };
+        },
+        readPoolGlobals: () => fetchGlobalUserRowsFromChain(userAddress),
+      });
 
     const applyPortfolioComputed = (user: Record<string, unknown>) => {
       if (!isCurrentFetchUser()) return;
@@ -4178,6 +4199,64 @@ const Portfolio = () => {
       console.log("[Portfolio] Network values:", networkValues);
     };
 
+    const paintWhenApiSnapshotMissing = async () => {
+      if (!isCurrentFetchUser()) return;
+      setUserProfileAvatar(null);
+      const pending = readPortfolioChainRefresh(userAddress);
+      if (pending.length > 0) {
+        try {
+          const overlaid = await overlayPending([], []);
+          if (!isCurrentFetchUser()) return;
+          if (overlaid.painted) {
+            applyPortfolioComputed({
+              address: userAddress,
+              globalUserData: overlaid.globalUserData,
+              userData: overlaid.userData,
+              userDataSource: "chain",
+            });
+            console.log(
+              "[Portfolio] Painted pending markets without an API user:",
+              pending.map((hint) => `${hint.network} ${hint.poolId}:${hint.marketId}`)
+            );
+            return;
+          }
+        } catch (pendingError) {
+          console.warn(
+            "[Portfolio] pending market paint failed:",
+            pendingError
+          );
+        }
+      }
+
+      if (!isCurrentFetchUser()) return;
+      applyPortfolioComputed({
+        address: userAddress,
+        globalUserData: [],
+        userData: [],
+        userDataSource: "chain",
+      });
+
+      console.log(
+        `[Portfolio] API missed this user; discovering positions from chain for ${userAddress}`
+      );
+      const chain = await fetchUserDataFromChain(userAddress);
+      if (!chain || !isCurrentFetchUser()) return;
+      const overlaid = await overlayPending(
+        chain.userData as Record<string, unknown>[],
+        chain.globalUserData as Record<string, unknown>[]
+      );
+      if (!isCurrentFetchUser()) return;
+      if (overlaid.userData.length === 0 && overlaid.globalUserData.length === 0) {
+        return;
+      }
+      applyPortfolioComputed({
+        address: userAddress,
+        globalUserData: overlaid.globalUserData,
+        userData: overlaid.userData,
+        userDataSource: "chain",
+      });
+    };
+
     try {
       console.log(
         `[Portfolio] Attempting to fetch user data from API for ${userAddress}`
@@ -4216,36 +4295,18 @@ const Portfolio = () => {
           ? (user.globalUserData as Record<string, unknown>[])
           : [];
 
-        const chainHint = postTxChainRefreshRef.current;
-        if (
-          chainHint &&
-          chainHint.address === userAddress &&
-          chainHint.until >= Date.now() &&
-          isCurrentFetchUser()
-        ) {
+        if (readPortfolioChainRefresh(userAddress).length > 0 && isCurrentFetchUser()) {
           try {
-            const snap = await fetchUserPositionSnapshotFromChain(
-              userAddress,
-              chainHint.network as NetworkId,
-              chainHint.poolId,
-              chainHint.marketId
-            );
-            if (isCurrentFetchUser() && (snap.userRow || snap.globalRow)) {
-              const merged = mergeChainPositionIntoApiSnapshot(
-                apiUserData,
-                apiGlobalUserData,
-                snap.userRow,
-                snap.globalRow
-              );
-              apiUserData = merged.userData;
-              apiGlobalUserData = merged.globalUserData;
-              console.log(
-                "[Portfolio] Overlaid algod position on API snapshot:",
-                `${chainHint.network} ${chainHint.poolId}:${chainHint.marketId}`,
-                snap.userRow
-                  ? `scaledDeposits=${snap.userRow.scaledDeposits}`
-                  : "no user row"
-              );
+            const overlaid = await overlayPending(apiUserData, apiGlobalUserData);
+            if (isCurrentFetchUser()) {
+              apiUserData = overlaid.userData;
+              apiGlobalUserData = overlaid.globalUserData;
+              if (overlaid.painted) {
+                console.log(
+                  "[Portfolio] Overlaid algod positions on API snapshot:",
+                  overlaid.userData.length
+                );
+              }
             }
           } catch (chainOverlayError) {
             console.warn(
@@ -4294,32 +4355,10 @@ const Portfolio = () => {
       }
 
       console.error("Error fetching user data:", apiResponse);
-
-      console.log(
-        `[Portfolio] API failed; falling back to chain for ${userAddress}`
-      );
-      const chain = await fetchUserDataFromChain(userAddress);
-      if (chain && isCurrentFetchUser()) {
-        setUserProfileAvatar(null);
-        applyPortfolioComputed({
-          address: userAddress,
-          globalUserData: chain.globalUserData,
-          userData: chain.userData,
-          userDataSource: "chain",
-        });
-      }
+      await paintWhenApiSnapshotMissing();
     } catch (error) {
       console.error("Error fetching user global data:", error);
-      const chain = await fetchUserDataFromChain(userAddress);
-      if (chain && isCurrentFetchUser()) {
-        setUserProfileAvatar(null);
-        applyPortfolioComputed({
-          address: userAddress,
-          globalUserData: chain.globalUserData,
-          userData: chain.userData,
-          userDataSource: "chain",
-        });
-      }
+      await paintWhenApiSnapshotMissing();
     } finally {
       // This invocation holds the lock. A newer call only sets the queued flag.
       fetchUserInFlight.current = false;
@@ -4331,9 +4370,21 @@ const Portfolio = () => {
     }
   };
 
+  fetchUserRef.current = fetchUser;
+
   useEffect(() => {
     if (!displayAddress) return;
     void fetchUser(displayAddress);
+  }, [displayAddress]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== PORTFOLIO_CHAIN_REFRESH_STORAGE_KEY) return;
+      if (!displayAddress) return;
+      void fetchUserRef.current(displayAddress);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, [displayAddress]);
 
   // Fast market hydrate: session cache → bulk Phase A (no oracle) → gap-fill
