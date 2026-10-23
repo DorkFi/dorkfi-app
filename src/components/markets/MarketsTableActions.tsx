@@ -3,7 +3,7 @@ import DorkFiButton from "@/components/ui/DorkFiButton";
 import {
   MINT_BORROW_CAP_TOOLTIP,
 } from "@/constants/lendingCaps";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft, ArrowUpCircle } from "lucide-react";
 
 interface MarketsTableActionsProps {
   asset: string;
@@ -14,6 +14,8 @@ interface MarketsTableActionsProps {
   onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
+  /** Withdraw the legacy PreFi balance to the wallet. Does not deposit into the live market. */
+  onMigrationWithdrawClick?: (asset: string) => void;
   migrationBalance?: string; // Formatted balance to display
   isLoadingBalance?: boolean;
   isSToken?: boolean;
@@ -38,6 +40,7 @@ const MarketsTableActions = ({
   onBorrowClick,
   onMintClick,
   onMigrateClick,
+  onMigrationWithdrawClick,
   migrationBalance,
   isLoadingBalance = false,
   isSToken = false,
@@ -89,6 +92,20 @@ const MarketsTableActions = ({
           {isSToken ? "Mint" : "Borrow"}
         </DorkFiButton>
       </div>
+      {onMigrationWithdrawClick && !isSToken && (
+        <DorkFiButton
+          variant="withdraw"
+          onClick={(e) => {
+            e.stopPropagation();
+            onMigrationWithdrawClick(asset);
+          }}
+          className="w-full"
+          title="Withdraw this PreFi balance to your wallet"
+        >
+          <ArrowUpCircle className="h-4 w-4" />
+          {migrationBalance ? `Withdraw ${migrationBalance} ${asset}` : "Withdraw"}
+        </DorkFiButton>
+      )}
       {onMigrateClick && !isSToken && (
         <DorkFiButton
           variant="secondary"

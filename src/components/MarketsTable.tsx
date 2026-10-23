@@ -60,6 +60,7 @@ import {
   fetchGlobalUserRowsFromChain,
   getMaxWithdrawableForMarket,
   migrate,
+  withdrawMigration,
   deposit,
   fetchMarketInfo,
   isMarketPaused,
@@ -1526,6 +1527,123 @@ const MarketsTable = () => {
         title: "Migration Failed",
         description:
           error instanceof Error ? error.message : "Migration failed",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleMigrationWithdrawClick = async (asset: string) => {
+    if (!activeAccount?.address) {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet to withdraw tokens",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const token = tokens.find((t) => t.symbol === asset);
+
+      if (!token) {
+        throw new Error(`Token not found for ${asset}`);
+      }
+
+      const originalSymbol =
+        "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
+      const tokenConfig = asTokenConfig(
+        getTokenConfig(currentNetwork, originalSymbol ?? asset),
+        (token as { poolId?: string }).poolId
+      );
+
+      if (!tokenConfig) {
+        throw new Error(`Token config not found for ${asset}`);
+      }
+
+      if (!tokenConfig.migration) {
+        throw new Error(`No migration config found for ${asset}`);
+      }
+
+      const clients = await getSyncedClientsForReads();
+      ARC200Service.initialize(clients);
+
+      const migrationBalance = await ARC200Service.getBalance(
+        activeAccount.address,
+        tokenConfig.migration.nTokenId
+      );
+
+      if (!migrationBalance || BigInt(migrationBalance) === 0n) {
+        throw new Error("No balance to withdraw");
+      }
+
+      const formattedBalance = ARC200Service.formatBalance(
+        migrationBalance,
+        tokenConfig.decimals
+      );
+
+      toast({
+        title: "Starting Withdraw",
+        description: `Withdrawing ${formattedBalance} ${asset} to your wallet...`,
+      });
+
+      const withdrawResult = await withdrawMigration(
+        tokenConfig.migration.poolId,
+        tokenConfig.migration.contractId,
+        tokenConfig.migration.nTokenId,
+        tokenConfig.tokenStandard,
+        migrationBalance,
+        activeAccount.address,
+        currentNetwork
+      );
+
+      if (!withdrawResult.success) {
+        throw new Error(withdrawResult.error || "Withdraw failed");
+      }
+
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Withdraw Transaction",
+        description: `Please open ${walletName} and sign the withdraw transaction`,
+        duration: 10000,
+      });
+
+      const withdrawTxns = withdrawResult.txns.map((txn: string) =>
+        Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+      );
+
+      const signedWithdrawTxns = await signTransactions(withdrawTxns);
+      const algorandClients = await getSyncedClientsForTransactions();
+      const withdrawRes = await algorandClients.algod
+        .sendRawTransaction(signedWithdrawTxns)
+        .do();
+      await waitForConfirmation(
+        algorandClients.algod,
+        withdrawRes.txid,
+        TX_CONFIRMATION_WAIT_ROUNDS
+      );
+
+      toast({
+        title: "Withdraw Successful",
+        description: `Withdrew ${formattedBalance} ${asset} to your wallet`,
+      });
+
+      setTimeout(() => {
+        loadMarketDataWithBypass(
+          marketRowCacheKey({
+            originalSymbol,
+            symbol: token.symbol,
+            poolId: token.poolId,
+          })
+        );
+        refreshWalletBalance(asset, token.poolId, undefined);
+      }, 2000);
+    } catch (error) {
+      console.error("Migration withdraw error:", error);
+      toast({
+        title: "Withdraw Failed",
+        description:
+          error instanceof Error ? error.message : "Withdraw failed",
         variant: "destructive",
       });
     }
@@ -3934,6 +4052,7 @@ const MarketsTable = () => {
               onBorrowClick={handleBorrowClick}
               onMintClick={handleMintClick}
               onMigrateClick={handleMigrateClick}
+              onMigrationWithdrawClick={handleMigrationWithdrawClick}
               isLoadingBalance={isLoadingBalance}
               getMarketActionHoverHandlers={getMarketActionHoverHandlers}
               onRowMouseEnter={prefetchMarketRowOnHover}
