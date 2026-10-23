@@ -5933,6 +5933,167 @@ export const migrate = async (
 };
 
 /**
+ * Withdraw a PreFi / legacy-pool position back to the wallet.
+ * PreFi pools expose `withdraw(uint64,uint256)void` (not the live pool's uint256 return),
+ * so this does not call {@link withdraw}. ASA and network positions are then unwrapped
+ * from the legacy nt200 contract. Nothing is deposited into the current market.
+ */
+export const withdrawMigration = async (
+  oldPoolId: string,
+  oldContractId: string,
+  oldNTokenId: string,
+  tokenStandard: TokenStandard,
+  amountAtomic: string,
+  userAddress: string,
+  networkId: NetworkId
+): Promise<
+  { success: false; error?: string } | { success: true; txns: string[] }
+> => {
+  console.log("withdrawMigration", {
+    oldPoolId,
+    oldContractId,
+    oldNTokenId,
+    tokenStandard,
+    amountAtomic,
+    userAddress,
+    networkId,
+  });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (!isAlgorandCompatibleNetwork(networkId)) {
+      throw new Error(
+        isEVMNetwork(networkId)
+          ? "EVM networks are not supported yet"
+          : "Unsupported network"
+      );
+    }
+
+    if (!/^\d+$/.test(amountAtomic) || BigInt(amountAtomic) === 0n) {
+      throw new Error("No balance to withdraw");
+    }
+
+    const bigAmount = BigInt(amountAtomic);
+    const clients = await algorandService.initializeClientsForReads(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    const ci = new CONTRACT(
+      Number(oldNTokenId),
+      clients.algod,
+      undefined,
+      abi.custom,
+      {
+        addr: userAddress,
+        sk: new Uint8Array(),
+      }
+    );
+
+    const builder = {
+      oldToken: new CONTRACT(
+        Number(oldContractId),
+        clients.algod,
+        undefined,
+        abi.nt200,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      ),
+      oldLendingPool: new CONTRACT(
+        Number(oldPoolId),
+        clients.algod,
+        undefined,
+        {
+          ...LendingPoolAppSpec.contract,
+          events: [],
+          methods: [
+            {
+              name: "withdraw",
+              args: [
+                { type: "uint64", name: "market_id" },
+                { type: "uint256", name: "amount" },
+              ],
+              readonly: false,
+              returns: { type: "void" },
+            },
+          ],
+        },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      ),
+    };
+
+    const shouldUnwrap =
+      tokenStandard === "network" ||
+      tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
+
+    if (shouldUnwrap && bigAmount > BigInt("18446744073709551615")) {
+      throw new Error("Withdraw amount exceeds the legacy token limit");
+    }
+
+    let customR: { success: boolean; txns?: string[] } | undefined;
+
+    for (const poolPayment of [0, 100000]) {
+      const buildN = [];
+      const poolWithdraw = (
+        await builder.oldLendingPool.withdraw(Number(oldContractId), bigAmount)
+      ).obj;
+      buildN.push({
+        ...poolWithdraw,
+        note: new TextEncoder().encode("lending withdraw"),
+        payment: poolPayment,
+      });
+
+      if (shouldUnwrap) {
+        const tokenWithdraw = (await builder.oldToken.withdraw(bigAmount)).obj;
+        buildN.push({
+          ...tokenWithdraw,
+          note: new TextEncoder().encode("atoken withdraw"),
+        });
+      }
+
+      ci.setFee(20000);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+      if (networkConfig.networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839);
+      }
+
+      customR = await ci.custom();
+      console.log("withdrawMigration", { poolPayment, customR });
+      if (customR.success) {
+        break;
+      }
+    }
+
+    if (!customR?.success || !customR.txns) {
+      throw new Error("Failed to create withdraw transaction");
+    }
+
+    return {
+      success: true,
+      txns: customR.txns,
+    };
+  } catch (error) {
+    console.error("Error withdrawing migration balance:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Withdraw failed",
+    };
+  }
+};
+
+/**
  * Detect whether the user already has an nt200/ARC200 balance box on the token app.
  * Simulates createBalanceBox alone (non-builder CONTRACT + abi.nt200) — do not
  * construct box names or call getApplicationBoxByName with guessed keys.

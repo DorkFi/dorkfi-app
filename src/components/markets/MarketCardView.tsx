@@ -14,7 +14,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import STokenCard from "./STokenCard";
 import { MarketRowTokenIcon } from "./MarketRowTokenIcon";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft, ArrowUpCircle } from "lucide-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getMarketLabel } from "@/config";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import {
@@ -37,6 +37,7 @@ interface MarketCardViewProps {
   onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
+  onMigrationWithdrawClick?: (asset: string) => void;
   getMarketActionHoverHandlers?: (
     asset: string,
     poolId?: string,
@@ -59,6 +60,7 @@ const MarketCardView = ({
   onBorrowClick,
   onMintClick,
   onMigrateClick,
+  onMigrationWithdrawClick,
   getMarketActionHoverHandlers,
   onRowMouseEnter,
   pinnedWadMintMarket,
@@ -411,19 +413,31 @@ const MarketCardView = ({
                 const hasMigration = !!tokenConfig?.migration;
                 const migrationBalance = migrationBalances[market.asset];
 
+                if (!hasMigration || !migrationBalance) return null;
                 return (
-                  onMigrateClick &&
-                  hasMigration &&
-                  migrationBalance && (
-                    <DorkFiButton
-                      variant="secondary"
-                      onClick={e => { e.stopPropagation(); onMigrateClick(market.asset); }}
-                      className="w-full border-blue-500 text-blue-600 hover:bg-blue-50 hover:border-blue-600 dark:text-blue-400 dark:border-blue-400 dark:hover:bg-blue-900/20"
-                    >
-                      <ArrowRightLeft className="h-4 w-4" /> 
-                      Migrate {migrationBalance} {market.asset}
-                    </DorkFiButton>
-                  )
+                  <>
+                    {onMigrationWithdrawClick && (
+                      <DorkFiButton
+                        variant="withdraw"
+                        onClick={e => { e.stopPropagation(); onMigrationWithdrawClick(market.asset); }}
+                        className="w-full"
+                        title="Withdraw this PreFi balance to your wallet"
+                      >
+                        <ArrowUpCircle className="h-4 w-4" />
+                        Withdraw {migrationBalance} {market.asset}
+                      </DorkFiButton>
+                    )}
+                    {onMigrateClick && (
+                      <DorkFiButton
+                        variant="secondary"
+                        onClick={e => { e.stopPropagation(); onMigrateClick(market.asset); }}
+                        className="w-full border-blue-500 text-blue-600 hover:bg-blue-50 hover:border-blue-600 dark:text-blue-400 dark:border-blue-400 dark:hover:bg-blue-900/20"
+                      >
+                        <ArrowRightLeft className="h-4 w-4" />
+                        Migrate {migrationBalance} {market.asset}
+                      </DorkFiButton>
+                    )}
+                  </>
                 );
               })()}
             </div>

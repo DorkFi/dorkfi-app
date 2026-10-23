@@ -22,6 +22,7 @@ interface MarketsTableContentProps {
   onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
+  onMigrationWithdrawClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
   getMarketActionHoverHandlers?: (
     asset: string,
@@ -49,6 +50,7 @@ const MarketsTableContent = ({
   onBorrowClick,
   onMintClick,
   onMigrateClick,
+  onMigrationWithdrawClick,
   isLoadingBalance = false,
   getMarketActionHoverHandlers,
   onRowMouseEnter,
@@ -67,6 +69,7 @@ const MarketsTableContent = ({
         onBorrowClick={onBorrowClick}
         onMintClick={onMintClick}
         onMigrateClick={onMigrateClick}
+        onMigrationWithdrawClick={onMigrationWithdrawClick}
         getMarketActionHoverHandlers={getMarketActionHoverHandlers}
         onRowMouseEnter={onRowMouseEnter}
         pinnedWadMintMarket={pinnedWadMintMarket}
@@ -86,6 +89,7 @@ const MarketsTableContent = ({
         onBorrowClick={onBorrowClick}
         onMintClick={onMintClick}
         onMigrateClick={onMigrateClick}
+        onMigrationWithdrawClick={onMigrationWithdrawClick}
         isLoadingBalance={isLoadingBalance}
         getMarketActionHoverHandlers={getMarketActionHoverHandlers}
         onRowMouseEnter={onRowMouseEnter}
@@ -106,6 +110,7 @@ const MarketsTableContent = ({
       onBorrowClick={onBorrowClick}
       onMintClick={onMintClick}
       onMigrateClick={onMigrateClick}
+      onMigrationWithdrawClick={onMigrationWithdrawClick}
       isLoadingBalance={isLoadingBalance}
       getMarketActionHoverHandlers={getMarketActionHoverHandlers}
       onRowMouseEnter={onRowMouseEnter}
