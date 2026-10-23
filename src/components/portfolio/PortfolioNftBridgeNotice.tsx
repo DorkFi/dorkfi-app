@@ -121,33 +121,17 @@ export default function PortfolioNftBridgeNotice({
       <DorkFiCard className="p-4 md:p-5">
         <div className="flex items-end gap-3 sm:gap-6">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-justify text-sm leading-snug text-muted-foreground">
               {networkId === "algorand-mainnet" ? (
                 <>
-                  Bridge Dork ASAs to{" "}
-                  <span className="text-foreground">DORKHJ</span> — the Algorand creator wallet
-                  (opted in to every Dork ASA) — and receive the matching NFT on Voi, plus weekly
-                  UNIT on Algorand.
+                  Bridge Dork ASAs to DORKHJ and receive the matching NFT on Voi. Expect a delay
+                  if the receiver wallet is not the sender.
                 </>
               ) : (
                 <>
-                  Bridge your Dork NFTs through DEVOUR and receive the matching ASA on Algorand,
-                  plus weekly UNIT airdrops on Algorand.
-                </>
-              )}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {networkId === "algorand-mainnet" ? (
-                <>
-                  It is the same DEVOUR bridge process: DORKHJ holds your ASA until the team
-                  releases the Voi NFT from DEVOUR. Expect a delay if the receiver wallet differs
-                  from the sender.
-                </>
-              ) : (
-                <>
-                  When we send you an Algorand asset number, opt in to that ASA. Expect a delay if
-                  the receiver wallet is different from the sender — releases use DEVOUR on Voi and
-                  DORKHJ on Algorand.
+                  Bridge Dork NFTs through DEVOUR and receive the matching ASA on Algorand. Opt in
+                  when you get the asset number. Expect a delay if the receiver wallet is not the
+                  sender.
                 </>
               )}
             </p>

@@ -255,9 +255,7 @@ export default function NftBridgeModal({
           <DialogDescription className="text-center sm:text-left">
             {step === "success"
               ? `Submitted to ${custodyLabel} — opt in on the destination chain when you receive asset numbers.`
-              : direction === "algorand-to-voi"
-                ? `Send ASAs from Algorand to ${custodyLabel} (Algorand creator wallet) and receive on Voi.`
-                : `Send from ${sourceNetwork} and receive on ${destNetwork}.`}
+              : `Send from ${sourceNetwork} and receive on ${destNetwork}.`}
           </DialogDescription>
         </DialogHeader>
 
