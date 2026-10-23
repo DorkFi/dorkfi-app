@@ -2,6 +2,8 @@ import algosdk, { type Algodv2, type Indexer } from "algosdk";
 import type { NetworkId } from "@/config";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
 import {
+  bridgeCustodyAddress,
+  bridgeRegistrationLogAddresses,
   DORK_NFT_BRIDGE_ADDRESS,
   NFT_BRIDGE_NOTE_PREFIX,
   type NftBridgeDirection,
@@ -191,14 +193,8 @@ async function buildAlgorandBridgeGroupForNft(
   if (!entry) {
     throw new Error(`Unknown Dork ASA mapping for ${nft.name}.`);
   }
+  const custody = bridgeCustodyAddress(direction);
   const params = normalizeSuggestedParams(await algod.getTransactionParams().do());
-  const axfer = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
-    sender,
-    receiver: DORK_NFT_BRIDGE_ADDRESS,
-    assetIndex: entry.assetId,
-    amount: 1n,
-    suggestedParams: { ...params, flatFee: true, fee: 2000n },
-  });
   const note = encodeBridgeIntentNote({
     v: 1,
     dir: direction,
@@ -206,17 +202,16 @@ async function buildAlgorandBridgeGroupForNft(
     sender,
     items: bridgeIntentItemsFromSelection([nft]),
   });
-  /** 0 ALGO payment — carries bridge intent note; fees are paid in ALGO on Algorand mainnet. */
-  const registration = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+  /** Algorand → Voi: ASA to DORKHJ (creator reserve, opted in to all Dork ASAs) with bridge note on the transfer. */
+  const axfer = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
     sender,
-    receiver: DORK_NFT_BRIDGE_ADDRESS,
-    amount: 0n,
+    receiver: custody,
+    assetIndex: entry.assetId,
+    amount: 1n,
     note,
-    suggestedParams: { ...params, flatFee: true, fee: 1000n },
+    suggestedParams: { ...params, flatFee: true, fee: 2000n },
   });
-  const group = [axfer, registration];
-  algosdk.assignGroupID(group);
-  return group;
+  return [axfer];
 }
 
 export type NftBridgeSigningBundle = {
@@ -293,13 +288,16 @@ export function flattenBridgeGroupsForSigning(
 export type ParsedBridgeIntent = NftBridgeIntentPayload & {
   txId: string;
   round: number;
-  /** Chain where the registration payment landed (same as the user’s bridge source network). */
+  /** Chain where the registration note was observed (user’s bridge source network). */
   sourceNetworkId: NetworkId;
+  /** Account that received the registration note or tagged asset transfer. */
+  custodyAddress: string;
 };
 
-export async function fetchPendingBridgeIntents(
+async function fetchBridgeIntentsForAddress(
   networkId: NetworkId,
-  limit = 50
+  custodyAddress: string,
+  limit: number
 ): Promise<ParsedBridgeIntent[]> {
   const algoNet = getAlgorandNetworkFromNetworkId(networkId);
   if (!algoNet) return [];
@@ -308,7 +306,7 @@ export async function fetchPendingBridgeIntents(
 
   const response = indexer
     .searchForTransactions()
-    .address(DORK_NFT_BRIDGE_ADDRESS)
+    .address(custodyAddress)
     .notePrefix(prefix)
     .limit(Math.min(limit, 100));
 
@@ -332,7 +330,28 @@ export async function fetchPendingBridgeIntents(
       txId: row.id ?? "",
       round: row["confirmed-round"] ?? 0,
       sourceNetworkId: networkId,
+      custodyAddress,
     });
   }
   return out;
+}
+
+export async function fetchPendingBridgeIntents(
+  networkId: NetworkId,
+  limit = 50
+): Promise<ParsedBridgeIntent[]> {
+  if (networkId !== "voi-mainnet" && networkId !== "algorand-mainnet") {
+    return [];
+  }
+  const addresses = bridgeRegistrationLogAddresses(networkId);
+  const batches = await Promise.all(
+    addresses.map((addr) => fetchBridgeIntentsForAddress(networkId, addr, limit))
+  );
+  const byTx = new Map<string, ParsedBridgeIntent>();
+  for (const row of batches.flat()) {
+    if (row.txId && !byTx.has(row.txId)) {
+      byTx.set(row.txId, row);
+    }
+  }
+  return [...byTx.values()].sort((a, b) => b.round - a.round);
 }

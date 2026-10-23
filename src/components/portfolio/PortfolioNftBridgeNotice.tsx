@@ -3,7 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
-import { DORK_NFT_BRIDGE_ADDRESS } from "@/config/nftBridge";
+import {
+  DORK_NFT_ALGORAND_RESERVE_ADDRESS,
+  DORK_NFT_BRIDGE_ADDRESS,
+} from "@/config/nftBridge";
 import type { NetworkId } from "@/config";
 import { useToast } from "@/hooks/use-toast";
 import { fetchUserNFTs } from "@/services/nftService";
@@ -56,11 +59,20 @@ export default function PortfolioNftBridgeNotice({
 
   if (!holdings.data) return null;
 
+  const custodyAddress =
+    networkId === "algorand-mainnet"
+      ? DORK_NFT_ALGORAND_RESERVE_ADDRESS
+      : DORK_NFT_BRIDGE_ADDRESS;
+  const custodyCopyLabel =
+    networkId === "algorand-mainnet" ? "DORKHJ address copied." : "DEVOUR address copied.";
+  const custodyButtonLabel =
+    networkId === "algorand-mainnet" ? "Copy DORKHJ" : "Copy DEVOUR";
+
   const markCopied = () => {
     setCopied(true);
     toast({
       title: "Wallet copied",
-      description: "DEVOUR address copied.",
+      description: custodyCopyLabel,
     });
     window.setTimeout(() => setCopied(false), 2000);
   };
@@ -69,7 +81,7 @@ export default function PortfolioNftBridgeNotice({
     try {
       if (navigator.clipboard?.writeText) {
         await Promise.race([
-          navigator.clipboard.writeText(DORK_NFT_BRIDGE_ADDRESS),
+          navigator.clipboard.writeText(custodyAddress),
           new Promise((_, reject) => {
             window.setTimeout(() => reject(new Error("clipboard timeout")), 700);
           }),
@@ -82,7 +94,7 @@ export default function PortfolioNftBridgeNotice({
     }
     try {
       const field = document.createElement("textarea");
-      field.value = DORK_NFT_BRIDGE_ADDRESS;
+      field.value = custodyAddress;
       field.setAttribute("readonly", "");
       field.style.position = "fixed";
       field.style.left = "-9999px";
@@ -95,7 +107,7 @@ export default function PortfolioNftBridgeNotice({
     } catch {
       toast({
         title: "Copy failed",
-        description: DORK_NFT_BRIDGE_ADDRESS,
+        description: custodyAddress,
         variant: "destructive",
       });
     }
@@ -110,13 +122,34 @@ export default function PortfolioNftBridgeNotice({
         <div className="flex items-end gap-3 sm:gap-6">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <p className="text-sm text-muted-foreground">
-              Bridge your Dork NFTs through DEVOUR and receive the matching NFT on the other
-              chain, plus weekly UNIT airdrops on Algorand.
+              {networkId === "algorand-mainnet" ? (
+                <>
+                  Bridge Dork ASAs to{" "}
+                  <span className="text-foreground">DORKHJ</span> — the Algorand creator wallet
+                  (opted in to every Dork ASA) — and receive the matching NFT on Voi, plus weekly
+                  UNIT on Algorand.
+                </>
+              ) : (
+                <>
+                  Bridge your Dork NFTs through DEVOUR and receive the matching ASA on Algorand,
+                  plus weekly UNIT airdrops on Algorand.
+                </>
+              )}
             </p>
             <p className="text-sm text-muted-foreground">
-              When we send you an Algorand asset number, opt in to that ASA. Expect a delay if
-              the receiver wallet is different from the sender — the team releases manually from
-              DEVOUR and DORKHJ.
+              {networkId === "algorand-mainnet" ? (
+                <>
+                  It is the same DEVOUR bridge process: DORKHJ holds your ASA until the team
+                  releases the Voi NFT from DEVOUR. Expect a delay if the receiver wallet differs
+                  from the sender.
+                </>
+              ) : (
+                <>
+                  When we send you an Algorand asset number, opt in to that ASA. Expect a delay if
+                  the receiver wallet is different from the sender — releases use DEVOUR on Voi and
+                  DORKHJ on Algorand.
+                </>
+              )}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <DorkFiButton
@@ -134,7 +167,7 @@ export default function PortfolioNftBridgeNotice({
                 onClick={() => void copyWallet()}
               >
                 <Copy className="mr-1.5 h-3 w-3" />
-                {copied ? "Copied" : "Copy DEVOUR"}
+                {copied ? "Copied" : custodyButtonLabel}
               </DorkFiButton>
             </div>
             {!canBridge && (

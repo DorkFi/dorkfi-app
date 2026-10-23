@@ -19,7 +19,10 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import type { NetworkId } from "@/config";
 import { useUserNFTs } from "@/hooks/useUserNFTs";
 import { filterUserNfts } from "@/components/liquidation/filterUserNfts";
-import { bridgeRegistrationCurrencyLabel } from "@/config/nftBridge";
+import {
+  bridgeCustodyLabel,
+  bridgeRegistrationCurrencyLabel,
+} from "@/config/nftBridge";
 import {
   bridgeDirectionForNetwork,
   destinationNetworkLabel,
@@ -67,6 +70,7 @@ export default function NftBridgeModal({
   const direction = bridgeDirectionForNetwork(currentNetwork as NetworkId);
   const destNetwork = destinationNetworkLabel(direction);
   const sourceNetwork = currentNetwork === "voi-mainnet" ? "Voi" : "Algorand";
+  const custodyLabel = bridgeCustodyLabel(direction);
   const registrationCurrency =
     currentNetwork === "voi-mainnet" || currentNetwork === "algorand-mainnet"
       ? bridgeRegistrationCurrencyLabel(currentNetwork)
@@ -177,7 +181,7 @@ export default function NftBridgeModal({
       setStep("success");
       toast({
         title: "Bridge submitted",
-        description: "Your NFTs were sent to DEVOUR. Our team will complete the bridge.",
+        description: `Your NFTs were sent to ${custodyLabel}. Our team will complete the bridge.`,
       });
     } catch (err) {
       const feedback = getTransactionErrorFeedback(err);
@@ -230,7 +234,7 @@ export default function NftBridgeModal({
                 Signing…
               </>
             ) : (
-              "Sign & send to DEVOUR"
+              `Sign & send to ${custodyLabel}`
             )}
           </Button>
         </>
@@ -250,8 +254,10 @@ export default function NftBridgeModal({
           <DialogTitle className="text-center sm:text-left">Bridge Dork NFTs</DialogTitle>
           <DialogDescription className="text-center sm:text-left">
             {step === "success"
-              ? "Submitted to DEVOUR — opt in on the destination chain when you receive asset numbers."
-              : `Send from ${sourceNetwork} and receive on ${destNetwork}.`}
+              ? `Submitted to ${custodyLabel} — opt in on the destination chain when you receive asset numbers.`
+              : direction === "algorand-to-voi"
+                ? `Send ASAs from Algorand to ${custodyLabel} (Algorand creator wallet) and receive on Voi.`
+                : `Send from ${sourceNetwork} and receive on ${destNetwork}.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -327,6 +333,14 @@ export default function NftBridgeModal({
                 </span>{" "}
                 on {destNetwork}.
               </p>
+              {direction === "algorand-to-voi" && (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  On Algorand, your ASA goes to{" "}
+                  <span className="font-medium text-foreground">DORKHJ</span> — the creator reserve
+                  wallet opted in to every Dork ASA. Same bridge process as DEVOUR on Voi; the team
+                  still releases your matching NFT on Voi from DEVOUR.
+                </p>
+              )}
               <RadioGroup
                 value={receiveMode}
                 onValueChange={(v) => handleReceiveModeChange(v as "same" | "different")}
@@ -371,11 +385,22 @@ export default function NftBridgeModal({
               <p className="text-muted-foreground">
                 Sign{" "}
                 <span className="font-medium text-foreground">{selectedNfts.length}</span>{" "}
-                transfer{selectedNfts.length === 1 ? "" : "s"} to DEVOUR. Each includes a{" "}
-                <span className="font-medium text-foreground">
-                  0 {registrationCurrency}
-                </span>{" "}
-                registration payment (fees still apply in {registrationCurrency}).
+                transfer{selectedNfts.length === 1 ? "" : "s"} to {custodyLabel}.
+                {direction === "voi-to-algorand" ? (
+                  <>
+                    {" "}
+                    Each includes a{" "}
+                    <span className="font-medium text-foreground">
+                      0 {registrationCurrency}
+                    </span>{" "}
+                    registration payment (fees still apply in {registrationCurrency}).
+                  </>
+                ) : (
+                  <>
+                    {" "}
+                    Registration data is attached to each ASA transfer (fees apply in ALGO).
+                  </>
+                )}
               </p>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -409,7 +434,7 @@ export default function NftBridgeModal({
           {step === "success" && (
             <div className="space-y-4 text-sm leading-relaxed">
               <p className="text-muted-foreground">
-                Your NFTs are on their way to DEVOUR. The team checks bridge logs periodically — it
+                Your NFTs are on their way to {custodyLabel}. The team checks bridge logs periodically — it
                 can take a while, especially if the receiver wallet differs from the sender.
               </p>
               {direction === "voi-to-algorand" && destAssets.length > 0 && (

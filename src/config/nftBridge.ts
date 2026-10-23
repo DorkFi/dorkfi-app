@@ -4,12 +4,35 @@ import registryData from "@/data/dorkNftAlgorandRegistry.json";
 export const DORK_NFT_BRIDGE_ADDRESS =
   "IDVOVR7DORKO42D5GNBXLA73QNSQ6VVSCKJHGDBZOVVKTPQWXPTCUUYMEI";
 
-/** DORKHJ — Algorand reserve that holds bridged Dork ASAs for outbound Voi → Algorand releases. */
+/**
+ * DORKHJ — Algorand ASA creator / reserve wallet (opted in to all Dork ASAs).
+ * Inbound Algorand → Voi bridges send ASAs here; outbound Voi → Algorand releases also use this wallet.
+ */
 export const DORK_NFT_ALGORAND_RESERVE_ADDRESS = registryData.reserve as string;
 
 export const NFT_BRIDGE_NOTE_PREFIX = "dorkfi-bridge:v1:";
 
 export type NftBridgeDirection = "voi-to-algorand" | "algorand-to-voi";
+
+/** On-chain custody inbox for the source-chain leg of a bridge. */
+export function bridgeCustodyAddress(direction: NftBridgeDirection): string {
+  return direction === "algorand-to-voi"
+    ? DORK_NFT_ALGORAND_RESERVE_ADDRESS
+    : DORK_NFT_BRIDGE_ADDRESS;
+}
+
+/** Short operator-facing label for the custody wallet on the source chain. */
+export function bridgeCustodyLabel(direction: NftBridgeDirection): "DEVOUR" | "DORKHJ" {
+  return direction === "algorand-to-voi" ? "DORKHJ" : "DEVOUR";
+}
+
+/** Indexer accounts to scan for `dorkfi-bridge:v1:` registration notes. */
+export function bridgeRegistrationLogAddresses(networkId: "voi-mainnet" | "algorand-mainnet"): string[] {
+  if (networkId === "voi-mainnet") {
+    return [DORK_NFT_BRIDGE_ADDRESS];
+  }
+  return [DORK_NFT_BRIDGE_ADDRESS, DORK_NFT_ALGORAND_RESERVE_ADDRESS];
+}
 
 export type NftBridgeIntentItem = {
   /** Source id: `arc72:<contract>:<token>` on Voi, or Algorand ASA id as string when bridging from Algorand. */

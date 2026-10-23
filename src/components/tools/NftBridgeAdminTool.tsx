@@ -78,8 +78,8 @@ export function NftBridgeAdminTool() {
         </Button>
         <p className="text-xs text-muted-foreground">
           Read-only view of{" "}
-          <code className="text-xs">{NFT_BRIDGE_NOTE_PREFIX}</code> notes on DEVOUR. Release is
-          handled from the engagement dashboard on your machine (DEVOUR / DORKHJ keys stay local).
+          <code className="text-xs">{NFT_BRIDGE_NOTE_PREFIX}</code>           notes on DEVOUR (Voi) and DEVOUR / DORKHJ (Algorand). Release is handled from the
+          engagement dashboard on your machine.
         </p>
       </div>
 
@@ -93,7 +93,8 @@ export function NftBridgeAdminTool() {
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="border-b bg-muted/40 text-xs uppercase text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">Registered on</th>
+                <th className="px-3 py-2 font-medium">Network</th>
+                <th className="px-3 py-2 font-medium">Custody</th>
                 <th className="px-3 py-2 font-medium">NFT</th>
                 <th className="px-3 py-2 font-medium">Direction</th>
                 <th className="px-3 py-2 font-medium">Sender</th>
@@ -108,6 +109,9 @@ export function NftBridgeAdminTool() {
                   <td className="px-3 py-2 align-top">
                     <div>{row.sourceNetworkId}</div>
                     <div className="text-xs text-muted-foreground">round {row.round}</div>
+                  </td>
+                  <td className="max-w-[100px] truncate px-3 py-2 align-top font-mono text-xs">
+                    {row.custodyAddress.slice(0, 8)}…
                   </td>
                   <td className="px-3 py-2 align-top font-medium">{row.itemName}</td>
                   <td className="px-3 py-2 align-top text-muted-foreground">{row.dir}</td>

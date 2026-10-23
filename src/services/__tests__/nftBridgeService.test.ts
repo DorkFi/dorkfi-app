@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  bridgeCustodyAddress,
+  bridgeCustodyLabel,
+  DORK_NFT_ALGORAND_RESERVE_ADDRESS,
+  DORK_NFT_BRIDGE_ADDRESS,
+} from "@/config/nftBridge";
+import {
   encodeBridgeIntentNote,
   enrichNftsForBridge,
   parseBridgeIntentNote,
@@ -23,6 +29,18 @@ describe("nftBridgeService notes", () => {
     const note = encodeBridgeIntentNote(payload);
     const parsed = parseBridgeIntentNote(note);
     expect(parsed).toEqual(payload);
+  });
+});
+
+describe("bridge custody addresses", () => {
+  it("uses DEVOUR for Voi to Algorand", () => {
+    expect(bridgeCustodyLabel("voi-to-algorand")).toBe("DEVOUR");
+    expect(bridgeCustodyAddress("voi-to-algorand")).toBe(DORK_NFT_BRIDGE_ADDRESS);
+  });
+
+  it("uses DORKHJ for Algorand to Voi", () => {
+    expect(bridgeCustodyLabel("algorand-to-voi")).toBe("DORKHJ");
+    expect(bridgeCustodyAddress("algorand-to-voi")).toBe(DORK_NFT_ALGORAND_RESERVE_ADDRESS);
   });
 });
 
