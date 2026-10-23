@@ -86,6 +86,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import VersionDisplay from "@/components/VersionDisplay";
+import { NftBridgeAdminTool } from "@/components/tools/NftBridgeAdminTool";
 import NonCustodialComplianceStrip from "@/components/NonCustodialComplianceStrip";
 import {
   getNetworkConfig,
@@ -12076,6 +12077,22 @@ export default function AdminDashboard() {
             <div className="flex justify-between items-center">
               <H2>Admin Tools</H2>
             </div>
+
+            <Card className="border-slate-200/80 dark:border-slate-600">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wrench className="h-5 w-5 text-slate-600 dark:text-slate-300" />
+                  Dork NFT bridge (DEVOUR / DORKHJ)
+                </CardTitle>
+                <CardDescription>
+                  Scan registration notes sent to DEVOUR and release matching NFTs from DORKHJ
+                  (Voi → Algorand) or DEVOUR on Voi (Algorand → Voi).
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <NftBridgeAdminTool />
+              </CardContent>
+            </Card>
 
             <Card className="border-slate-200/80 dark:border-slate-600">
               <CardHeader>

@@ -5841,7 +5841,15 @@ const Portfolio = () => {
           );
         })()}
 
-      <PortfolioNftBridgeNotice address={displayAddress} />
+      <PortfolioNftBridgeNotice
+        address={displayAddress}
+        networkId={currentNetwork}
+        canBridge={Boolean(
+          activeAccount?.address &&
+            displayAddress &&
+            activeAccount.address.toLowerCase() === displayAddress.toLowerCase()
+        )}
+      />
 
       {/* Per-Network Asset Tables */}
       {user?.computed?.networkValues &&
