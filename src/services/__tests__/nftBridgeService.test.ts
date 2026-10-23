@@ -9,6 +9,7 @@ import {
   encodeBridgeIntentNote,
   enrichNftsForBridge,
   bridgeSubmitOutcomeError,
+  encodeLegacyBridgeDestinationNote,
   formatBridgeFeeCurrencyError,
   formatBridgeReceiveLine,
   parseBridgeIntentNote,
@@ -44,6 +45,21 @@ describe("bridge custody addresses", () => {
   it("uses DORKHJ for Algorand to Voi", () => {
     expect(bridgeCustodyLabel("algorand-to-voi")).toBe("DORKHJ");
     expect(bridgeCustodyAddress("algorand-to-voi")).toBe(DORK_NFT_ALGORAND_RESERVE_ADDRESS);
+  });
+});
+
+describe("encodeLegacyBridgeDestinationNote", () => {
+  it("accepts a 58-char mainnet address as raw note bytes", () => {
+    const addr =
+      "IDVOVR7DORKO42D5GNBXLA73QNSQ6VVSCKJHGDBZOVVKTPQWXPTCUUYMEI";
+    const note = encodeLegacyBridgeDestinationNote(addr);
+    expect(note).not.toBeNull();
+    expect(new TextDecoder().decode(note!)).toBe(addr);
+    expect(note!.length).toBe(58);
+  });
+
+  it("rejects invalid addresses", () => {
+    expect(encodeLegacyBridgeDestinationNote("not-an-address")).toBeNull();
   });
 });
 

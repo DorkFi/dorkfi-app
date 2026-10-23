@@ -12,6 +12,22 @@ export const DORK_NFT_ALGORAND_RESERVE_ADDRESS = registryData.reserve as string;
 
 export const NFT_BRIDGE_NOTE_PREFIX = "dorkfi-bridge:v1:";
 
+/**
+ * On-chain registration (dual format for bridge.py + in-app admin).
+ *
+ * **Forward (Voi → Algorand)** — one atomic group per NFT, user signs:
+ * 1. ARC-72 transfer → DEVOUR (`IDVOVR7…`)
+ * 2. Pay 0 VOI → DEVOUR, note `dorkfi-bridge:v1:` + JSON intent (`receiver` = Algorand ASA recipient)
+ * 3. Pay 0 VOI → DEVOUR, note = **only** the 58-char Algorand `receiver` (legacy wallet resolution)
+ *
+ * **Return (Algorand → Voi)** — one atomic group per NFT:
+ * 1. Axfer 1 ASA → DORKHJ, note = **only** the 58-char Voi `receiver`
+ * 2. Pay 0 ALGO → DEVOUR, note `dorkfi-bridge:v1:` + JSON intent
+ *
+ * Indexer scans: `fetchPendingBridgeIntents` uses notePrefix `dorkfi-bridge:v1:` on DEVOUR (+ DORKHJ on Algorand).
+ * Engagement dashboard / bridge.py should still read (2) address-only notes on Voi forward and (1) on Algorand return axfer.
+ */
+
 export type NftBridgeDirection = "voi-to-algorand" | "algorand-to-voi";
 
 /** On-chain custody inbox for the source-chain leg of a bridge. */

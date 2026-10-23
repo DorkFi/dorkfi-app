@@ -120,6 +120,17 @@ export function enrichNftsForBridge(
   return out;
 }
 
+/** Legacy bridge board: destination note is exactly the 58-char address, no prefix or JSON. */
+export function encodeLegacyBridgeDestinationNote(
+  receiver: string
+): Uint8Array | null {
+  const trimmed = receiver.trim();
+  if (!algosdk.isValidAddress(trimmed)) return null;
+  const bytes = new TextEncoder().encode(trimmed);
+  if (bytes.length !== 58) return null;
+  return bytes;
+}
+
 export function encodeBridgeIntentNote(payload: NftBridgeIntentPayload): Uint8Array {
   const json = JSON.stringify(payload);
   const note = `${NFT_BRIDGE_NOTE_PREFIX}${json}`;
@@ -232,7 +243,20 @@ async function buildVoiBridgeGroupForNft(
     note,
     suggestedParams: { ...params, flatFee: true, fee: 1000n },
   });
-  const group = [...transferTxns, registration];
+  const group: algosdk.Transaction[] = [...transferTxns, registration];
+  const legacyDestNote = encodeLegacyBridgeDestinationNote(receiver);
+  if (legacyDestNote) {
+    /** Legacy forward path: depositor 0-VOI to DEVOUR with address-only note (bridge.py `_forward_destination`). */
+    group.push(
+      algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+        sender,
+        receiver: DORK_NFT_BRIDGE_ADDRESS,
+        amount: 0n,
+        note: legacyDestNote,
+        suggestedParams: { ...params, flatFee: true, fee: 1000n },
+      })
+    );
+  }
   if (group.length > ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP) {
     throw new Error("Bridge transaction group is too large for this NFT.");
   }
@@ -253,23 +277,39 @@ async function buildAlgorandBridgeGroupForNft(
   }
   const custody = bridgeCustodyAddress(direction);
   const params = normalizeSuggestedParams(await algod.getTransactionParams().do());
-  const note = encodeBridgeIntentNote({
+  const legacyDestNote = encodeLegacyBridgeDestinationNote(receiver);
+  if (!legacyDestNote) {
+    throw new Error(
+      `Enter a valid ${direction === "algorand-to-voi" ? "Voi" : "Algorand"} destination address.`
+    );
+  }
+  const jsonNote = encodeBridgeIntentNote({
     v: 1,
     dir: direction,
     receiver,
     sender,
     items: bridgeIntentItemsFromSelection([nft]),
   });
-  /** Algorand → Voi: ASA to DORKHJ (creator reserve, opted in to all Dork ASAs) with bridge note on the transfer. */
+  /** Return leg: legacy bridge expects the Voi receiver as the only axfer note bytes. */
   const axfer = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
     sender,
     receiver: custody,
     assetIndex: entry.assetId,
     amount: 1n,
-    note,
+    note: legacyDestNote,
     suggestedParams: { ...params, flatFee: true, fee: 2000n },
   });
-  return [axfer];
+  /** Structured intent for DorkFi admin / automation (`notePrefix` scan on DEVOUR). */
+  const registration = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    sender,
+    receiver: DORK_NFT_BRIDGE_ADDRESS,
+    amount: 0n,
+    note: jsonNote,
+    suggestedParams: { ...params, flatFee: true, fee: 1000n },
+  });
+  const group = [axfer, registration];
+  algosdk.assignGroupID(group);
+  return group;
 }
 
 export type NftBridgeSigningBundle = {
