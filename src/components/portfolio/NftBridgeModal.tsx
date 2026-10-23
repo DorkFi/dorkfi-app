@@ -46,6 +46,10 @@ function nftKey(nft: BridgeableNft): string {
   return `${nft.contractId}-${nft.tokenId}`;
 }
 
+/** Compact multi-NFT lists on confirm / success (fill columns before growing height). */
+const bridgeSummaryListGrid =
+  "grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3 md:grid-cols-4";
+
 export default function NftBridgeModal({
   open,
   onOpenChange,
@@ -257,7 +261,12 @@ export default function NftBridgeModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(90vh,640px)] min-h-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+      <DialogContent
+        className={cn(
+          "flex max-h-[min(90vh,640px)] min-h-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-md",
+          (step === "confirm" || step === "success") && "sm:max-w-lg"
+        )}
+      >
         <DialogHeader className="shrink-0 space-y-1 px-5 pb-2 pt-5 text-left sm:px-6 sm:pt-6">
           <DialogTitle className="text-center sm:text-left">Bridge Dork NFTs</DialogTitle>
           <DialogDescription className="text-center sm:text-left">
@@ -415,11 +424,11 @@ export default function NftBridgeModal({
               </p>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  You&apos;re signing away
+                  Shipping out
                 </p>
-                <ul className="space-y-1.5">
+                <ul className={bridgeSummaryListGrid}>
                   {selectedNfts.map((nft) => (
-                    <li key={nftKey(nft)} className="text-sm">
+                    <li key={nftKey(nft)} className="text-sm leading-snug">
                       {nft.name}
                     </li>
                   ))}
@@ -451,9 +460,9 @@ export default function NftBridgeModal({
                       ? "Receive on Algorand (opt in to ASA)"
                       : `Receive on ${destNetwork}`}
                   </p>
-                  <ul className="space-y-1.5">
+                  <ul className={bridgeSummaryListGrid}>
                     {destAssets.map((row) => (
-                      <li key={row.lineKey} className="text-sm">
+                      <li key={row.lineKey} className="text-xs leading-snug sm:text-sm">
                         {row.receiveLine}
                       </li>
                     ))}
