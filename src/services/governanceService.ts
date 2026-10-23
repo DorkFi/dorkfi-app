@@ -20,6 +20,11 @@ import algosdk, { TransactionSigner } from "algosdk";
 import { ProposalCategory } from "@/types/governanceTypes";
 import { getCategoryId } from "@/constants/governanceConstants";
 import { APP_SPEC as UNITGovernanceAppSpec, PowerSnapshot, PowerSource, PowerMultiplierSnapshot } from "@/clients/UNITGovernanceClient";
+import {
+  deployedUnitLpPowerAdapters,
+  TINYMAN_V2_VALIDATOR_APP_ID,
+  UNIT_LP_POWER_SOURCE_SPEC,
+} from "@/constants/unitLpPowerSource";
 
 /**
  * Default rounds to look back for governance indexer/event scans.
@@ -1159,6 +1164,56 @@ export interface BatchVoteResult {
 }
 
 /**
+ * Sync each deployed UNIT-in-LP converter, then snap it as a governance power
+ * source. No-ops until converter app ids are filled in and registered on-chain.
+ */
+async function buildUnitLpPowerPrepTxns(params: {
+  algod: ConstructorParameters<typeof CONTRACT>[1];
+  sender: string;
+  storageAppId: number;
+  appStorageId: number;
+  governanceBuilder: {
+    snap_power: (id: bigint) => Promise<{ obj: Record<string, unknown> }>;
+  };
+}): Promise<Record<string, unknown>[]> {
+  const adapters = deployedUnitLpPowerAdapters();
+  if (adapters.length === 0) return [];
+
+  const txns: Record<string, unknown>[] = [];
+  for (const adapter of adapters) {
+    const converter = new CONTRACT(
+      adapter.appId,
+      params.algod,
+      undefined,
+      UNIT_LP_POWER_SOURCE_SPEC,
+      {
+        addr: params.sender,
+        sk: new Uint8Array(),
+      },
+      true,
+      false,
+      true
+    );
+    const syncO = (await converter.sync()).obj;
+    txns.push({
+      ...syncO,
+      note: new TextEncoder().encode(`unit-lp power sync ${adapter.pairId}`),
+      foreignApps: [adapter.pair.lpContractId, TINYMAN_V2_VALIDATOR_APP_ID],
+      accounts: [adapter.pair.poolAddr],
+    });
+    const snapO = (
+      await params.governanceBuilder.snap_power(BigInt(adapter.appId))
+    ).obj;
+    txns.push({
+      ...snapO,
+      note: new TextEncoder().encode(`unit-lp power snap ${adapter.pairId}`),
+      foreignApps: [adapter.appId, params.storageAppId, params.appStorageId],
+    });
+  }
+  return txns;
+}
+
+/**
  * Casts a vote on a governance proposal
  * @param params Vote parameters including proposal ID, support (true = for, false = against), and sender
  * @param networkId Optional network ID, defaults to current network
@@ -1256,6 +1311,15 @@ export const castVote = async (
 
     const buildN = [];
 
+    const prepTxns = await buildUnitLpPowerPrepTxns({
+      algod: clients.algod,
+      sender: params.sender,
+      storageAppId,
+      appStorageId,
+      governanceBuilder: builder.governance,
+    });
+    buildN.push(...prepTxns);
+
     {
       const txnO = (await builder.governance.cast_vote(proposalNode, voteValue)).obj;
       buildN.push({
@@ -1267,7 +1331,7 @@ export const castVote = async (
     }
 
     ci.setExtraTxns(buildN);
-    ci.setFee(8000);
+    ci.setFee(8000 + prepTxns.length * 4000);
     ci.setEnableGroupResourceSharing(true);
     if (networkConfig.networkId === "algorand-mainnet") {
       ci.setBeaconId(3209233839); // TODO move this to ulujs
@@ -1376,6 +1440,15 @@ export const castBatchVote = async (
 
     const buildN = [];
 
+    const prepTxns = await buildUnitLpPowerPrepTxns({
+      algod: clients.algod,
+      sender: params.sender,
+      storageAppId,
+      appStorageId,
+      governanceBuilder: builder.governance,
+    });
+    buildN.push(...prepTxns);
+
     // Calculate total payment amount: number of votes * 1e5
     const totalPayment = params.votes.length * 1e5;
 
@@ -1416,7 +1489,7 @@ export const castBatchVote = async (
 
     ci.setExtraTxns(buildN);
     // Adjust fee based on number of votes (base fee + per-vote fee)
-    ci.setFee(8000 + (params.votes.length - 1) * 2000);
+    ci.setFee(8000 + (params.votes.length - 1) * 2000 + prepTxns.length * 4000);
     ci.setEnableGroupResourceSharing(true);
     const result = await ci.custom();
 
@@ -1566,6 +1639,113 @@ export const closeVotingEarly = async (
     };
   } catch (error: any) {
     console.error("Failed to close voting early:", error);
+    return {
+      success: false,
+      error: error?.message || "Unknown error occurred",
+    };
+  }
+};
+
+export interface AddPowerSourceParams {
+  powerSourceId: number;
+  powerMultiplier: number;
+  supportedModes: number;
+  sender: string;
+}
+
+/**
+ * Owner-only: register an app as a governance power source.
+ * Live UNIT nToken uses multiplier 10000 and supported_modes 1.
+ */
+export const addPowerSource = async (
+  params: AddPowerSourceParams,
+  networkId?: NetworkId
+): Promise<{ success: boolean; txns?: string[]; error?: string }> => {
+  try {
+    const networkConfig = networkId
+      ? getNetworkConfig(networkId)
+      : getCurrentNetworkConfig();
+
+    if (!(networkId ? isAVMNetwork(networkId) : isCurrentNetworkAVM())) {
+      throw new Error("Governance power sources are only supported on AVM networks");
+    }
+
+    const governanceConfig = getContractAddress(
+      networkId ?? (networkConfig.networkId as NetworkId),
+      "governance"
+    ) as GovernanceConfig | string | undefined;
+
+    if (!governanceConfig || typeof governanceConfig === "string") {
+      throw new Error("Governance config must include storageAppId");
+    }
+
+    const appId = governanceConfig.appId;
+    const clients = algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    const ci = new CONTRACT(
+      appId,
+      clients.algod,
+      undefined,
+      abi.custom,
+      {
+        addr: params.sender,
+        sk: new Uint8Array(),
+      }
+    );
+    const builder = {
+      governance: new CONTRACT(
+        appId,
+        clients.algod,
+        undefined,
+        {
+          ...UNITGovernanceAppSpec.contract,
+          events: [],
+        },
+        {
+          addr: params.sender,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      ),
+    };
+
+    const txnO = (
+      await builder.governance.add_power_source(
+        BigInt(params.powerSourceId),
+        BigInt(params.powerMultiplier),
+        BigInt(params.supportedModes)
+      )
+    ).obj;
+
+    ci.setExtraTxns([
+      {
+        ...txnO,
+        note: new TextEncoder().encode(
+          `governance add_power_source ${params.powerSourceId}`
+        ),
+        payment: 2e5,
+        foreignApps: [params.powerSourceId, governanceConfig.storageAppId, governanceConfig.appStorageId],
+      },
+    ]);
+    ci.setFee(8000);
+    ci.setEnableGroupResourceSharing(true);
+    if (networkConfig.networkId === "algorand-mainnet") {
+      ci.setBeaconId(3209233839);
+    }
+    const result = await ci.custom();
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.returnValue || "Failed to add power source",
+      };
+    }
+    return { success: true, txns: result.txns || [] };
+  } catch (error: any) {
+    console.error("Failed to add power source:", error);
     return {
       success: false,
       error: error?.message || "Unknown error occurred",

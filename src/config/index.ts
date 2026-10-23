@@ -2144,7 +2144,11 @@ const algorandProdGovernance = {
   storageAppId: 3436628276,
   appStorageId: 3333688254,
   powerSources: [
-    3333783429, // UNIT nToken appId
+    3333783429, // UNIT nToken (Pool A). On-chain: add_power_source(id, 10000, 1)
+    // After UnitLpPowerSource deploy + owner add_power_source(appId, 10000, 1):
+    // UNIT/ALGO converter appId,
+    // UNIT/goBTC converter appId,
+    // WAD/UNIT converter appId,
   ],
   powerMultipliers: [],
 }

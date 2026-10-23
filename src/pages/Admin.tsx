@@ -184,7 +184,9 @@ import {
   ROLE_PRICE_FEED_MANAGER,
 } from "@/constants/roles";
 import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
-import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier, closeVotingEarly } from "@/services/governanceService";
+import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier, closeVotingEarly, addPowerSource } from "@/services/governanceService";
+import { deployUnitLpPowerSources, type DeployedUnitLpPowerApp } from "@/services/unitLpPowerSourceDeploy";
+import { UNIT_LP_POWER_MULTIPLIER, UNIT_LP_POWER_SUPPORTED_MODES } from "@/constants/unitLpPowerSource";
 import { getCategoryFromId, PROPOSAL_CATEGORY_DISPLAY_NAMES, isProposalBlacklisted } from "@/constants/governanceConstants";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
@@ -1238,6 +1240,14 @@ export default function AdminDashboard() {
   const [powerSourceQueryId, setPowerSourceQueryId] = useState<number | "">("");
   const [isLoadingPowerSource, setIsLoadingPowerSource] = useState(false);
   const [powerSourceResult, setPowerSourceResult] = useState<any | null>(null);
+  const [isDeployingUnitLpPower, setIsDeployingUnitLpPower] = useState(false);
+  const [unitLpPowerDeployResult, setUnitLpPowerDeployResult] = useState<
+    DeployedUnitLpPowerApp[] | null
+  >(null);
+  const [unitLpPowerDeployError, setUnitLpPowerDeployError] = useState<string | null>(null);
+  const [addPowerSourceId, setAddPowerSourceId] = useState("");
+  const [isAddingPowerSource, setIsAddingPowerSource] = useState(false);
+  const [addPowerSourceError, setAddPowerSourceError] = useState<string | null>(null);
   const [powerSourceError, setPowerSourceError] = useState<string | null>(null);
 
   // Individual Market View state
@@ -16430,6 +16440,162 @@ export default function AdminDashboard() {
                     Clear
                   </DorkFiButton>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="h-5 w-5" />
+                  Deploy UNIT-in-LP power sources
+                </CardTitle>
+                <CardDescription>
+                  Creates three UnitLpPowerSource apps (UNIT/ALGO, UNIT/goBTC, WAD/UNIT). Any funded
+                  wallet can deploy. Does not register them on governance — the owner does that with
+                  Add Power Source.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {unitLpPowerDeployResult && (
+                  <div className="p-3 rounded-lg border text-sm font-mono space-y-1">
+                    {unitLpPowerDeployResult.map((row) => (
+                      <p key={row.pairId}>
+                        {row.pairId}: {row.appId} ({row.txid})
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {unitLpPowerDeployError && (
+                  <p className="text-sm text-red-600">{unitLpPowerDeployError}</p>
+                )}
+                <DorkFiButton
+                  variant="primary"
+                  disabled={isDeployingUnitLpPower || !activeAccount?.address || !transactionSigner}
+                  onClick={async () => {
+                    if (!activeAccount?.address || !transactionSigner) {
+                      toast.error("Please connect your wallet");
+                      return;
+                    }
+                    setIsDeployingUnitLpPower(true);
+                    setUnitLpPowerDeployError(null);
+                    setUnitLpPowerDeployResult(null);
+                    try {
+                      const rows = await deployUnitLpPowerSources({
+                        sender: activeAccount.address,
+                        signer: transactionSigner,
+                        networkId: currentNetwork,
+                      });
+                      setUnitLpPowerDeployResult(rows);
+                      toast.success("UNIT-in-LP converters deployed");
+                    } catch (error: any) {
+                      const message = error?.message || "Deploy failed";
+                      setUnitLpPowerDeployError(message);
+                      toast.error("Deploy failed", { description: message });
+                    } finally {
+                      setIsDeployingUnitLpPower(false);
+                    }
+                  }}
+                >
+                  {isDeployingUnitLpPower ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Deploying…
+                    </>
+                  ) : (
+                    "Deploy three converters"
+                  )}
+                </DorkFiButton>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Key className="h-5 w-5" />
+                  Add Power Source
+                </CardTitle>
+                <CardDescription>
+                  Owner-only. Registers a converter with the same params as UNIT nToken:
+                  multiplier {UNIT_LP_POWER_MULTIPLIER}, modes {UNIT_LP_POWER_SUPPORTED_MODES}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="add-power-source-id">Power source app ID</Label>
+                  <Input
+                    id="add-power-source-id"
+                    placeholder="Converter app id"
+                    value={addPowerSourceId}
+                    onChange={(e) => setAddPowerSourceId(e.target.value)}
+                  />
+                </div>
+                {addPowerSourceError && (
+                  <p className="text-sm text-red-600">{addPowerSourceError}</p>
+                )}
+                <DorkFiButton
+                  variant="primary"
+                  disabled={
+                    isAddingPowerSource ||
+                    !addPowerSourceId.trim() ||
+                    !activeAccount?.address ||
+                    !signTransactions
+                  }
+                  onClick={async () => {
+                    if (!activeAccount?.address || !signTransactions) {
+                      toast.error("Please connect the governance owner wallet");
+                      return;
+                    }
+                    const powerSourceId = Number(addPowerSourceId.trim());
+                    if (!Number.isFinite(powerSourceId) || powerSourceId <= 0) {
+                      toast.error("Enter a valid app id");
+                      return;
+                    }
+                    setIsAddingPowerSource(true);
+                    setAddPowerSourceError(null);
+                    try {
+                      const result = await addPowerSource(
+                        {
+                          powerSourceId,
+                          powerMultiplier: UNIT_LP_POWER_MULTIPLIER,
+                          supportedModes: UNIT_LP_POWER_SUPPORTED_MODES,
+                          sender: activeAccount.address,
+                        },
+                        currentNetwork
+                      );
+                      if (!result.success || !result.txns?.length) {
+                        throw new Error(result.error || "Failed to build add_power_source");
+                      }
+                      const clients = algorandService.initializeClients(
+                        getNetworkConfig(currentNetwork).walletNetworkId as AlgorandNetwork
+                      );
+                      const stxns = await signTransactions(
+                        result.txns.map((txn: string) =>
+                          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                        )
+                      );
+                      const res = await clients.algod.sendRawTransaction(stxns).do();
+                      await waitForConfirmation(clients.algod, res.txid, 4);
+                      toast.success("Power source added", {
+                        description: `Tx ${res.txid}`,
+                      });
+                    } catch (error: any) {
+                      const message = error?.message || "Add power source failed";
+                      setAddPowerSourceError(message);
+                      toast.error("Add power source failed", { description: message });
+                    } finally {
+                      setIsAddingPowerSource(false);
+                    }
+                  }}
+                >
+                  {isAddingPowerSource ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Adding…
+                    </>
+                  ) : (
+                    `add_power_source(id, ${UNIT_LP_POWER_MULTIPLIER}, ${UNIT_LP_POWER_SUPPORTED_MODES})`
+                  )}
+                </DorkFiButton>
               </CardContent>
             </Card>
 
