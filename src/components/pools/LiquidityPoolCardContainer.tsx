@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import {
-  resolvePoolsPageLendingMarket,
-  resolveLiquidityPoolLendingMarket,
   poolHasTinymanFarm,
+  resolvePoolsPageLendingMarket,
   type LiquidityPoolPairConfig,
 } from "@/constants/liquidityPools";
 import {
@@ -13,6 +12,7 @@ import {
 } from "@/hooks/useLiquidityPoolData";
 import { fetchUserDepositBalance } from "@/services/lendingService";
 import { isFeatureEnabled } from "@/config";
+import { pairLpAtomicToHuman } from "@/services/mythLiquidityService";
 import PoolPairCard from "./PoolPairCard";
 import PoolLiquidityModal, { type PoolLiquidityMode } from "./PoolLiquidityModal";
 import PoolLendingModals from "./PoolLendingModals";
@@ -33,22 +33,32 @@ const LiquidityPoolCardContainer = ({
     activeAccount?.address
   );
   const invalidatePools = useInvalidateLiquidityPools([pair]);
-  const showDepositWithdraw = isFeatureEnabled("enablePoolDepositWithdraw");
+  const showDepositWithdraw =
+    isFeatureEnabled("enablePoolDepositWithdraw") && pair.platform === "tinyman";
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<PoolLiquidityMode>("deposit");
   const [supplyOpen, setSupplyOpen] = useState(false);
   const [lendingWithdrawOpen, setLendingWithdrawOpen] = useState(false);
   const [suppliedBalance, setSuppliedBalance] = useState(0);
 
-  const lendingMarket = useMemo(
-    () => resolvePoolsPageLendingMarket(pair.networkId, pair),
-    [pair]
-  );
+  const lendingMarket = useMemo(() => {
+    const listed = resolvePoolsPageLendingMarket(pair.networkId, pair);
+    // Flag is UI-only. Tokens are not registered unless it is on, so Supply
+    // cannot point at a Myth market while lending looks "off".
+    if (
+      pair.platform === "myth" &&
+      !isFeatureEnabled("enableMythPoolLending")
+    ) {
+      return null;
+    }
+    return listed;
+  }, [pair]);
 
   const walletLpBalanceHuman = useMemo(() => {
-    if (!position?.poolTokenBalance) return 0;
-    return Number(position.poolTokenBalance) / 1e6;
-  }, [position?.poolTokenBalance]);
+    const primary = position?.poolTokenBalance ?? 0n;
+    const alternate = position?.alternatePoolTokenBalance ?? 0n;
+    return pairLpAtomicToHuman(pair, primary + alternate);
+  }, [pair, position?.alternatePoolTokenBalance, position?.poolTokenBalance]);
 
   useEffect(() => {
     if (!lendingMarket || !activeAccount?.address) {
@@ -103,9 +113,17 @@ const LiquidityPoolCardContainer = ({
         onWithdraw={() => openModal("withdraw")}
         showDepositWithdraw={showDepositWithdraw}
         lendingMarket={lendingMarket}
-        onSupply={() => setSupplyOpen(true)}
-        onLendingWithdraw={() => setLendingWithdrawOpen(true)}
-        lendingSupplyDisabled={walletLpBalanceHuman <= 0}
+        onSupply={() => {
+          if (lendingMarket) {
+            setSupplyOpen(true);
+          }
+        }}
+        onLendingWithdraw={() => {
+          if (lendingMarket) {
+            setLendingWithdrawOpen(true);
+          }
+        }}
+        lendingSupplyDisabled={walletLpBalanceHuman <= 0 || !lendingMarket}
         lendingWithdrawDisabled={suppliedBalance <= 0}
         suppliedLpBalance={suppliedBalance}
       />

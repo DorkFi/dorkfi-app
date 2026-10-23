@@ -13,5 +13,6 @@ export function shouldShowConfigSymbolUnderDisplayAsset(
   const c = String(configSymbol).trim().toLowerCase();
   if (a === c) return false;
   if (a === "algo" && c === "falgo") return false;
+  if (c.startsWith("lp_myth_") || c.startsWith("lp_tmpool2_")) return false;
   return true;
 }

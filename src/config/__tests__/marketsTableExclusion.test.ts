@@ -4,7 +4,7 @@ import {
   getPortfolioVisibleTokens,
   isMarketsTableExcludedMarket,
   isMarketsTableExcludedPool,
-  isPortfolioExcludedMarketContract,
+  isPortfolioHiddenToken,
 } from "@/config";
 
 const POOL_C = "3578814346";
@@ -87,6 +87,43 @@ describe("markets table Pool C exclusion", () => {
     expect(
       visible.some((token) =>
         String(token.configKey ?? "").startsWith("LP_TMPOOL2_")
+      )
+    ).toBe(false);
+  });
+});
+
+describe("Myth dualSTAKE LP_MYTH_* visibility", () => {
+  const POOL_A = "3333688282";
+
+  it("hides Myth LP from Markets even on Pool A, but not from Portfolio", () => {
+    expect(
+      isMarketsTableExcludedMarket(
+        "algorand-mainnet",
+        POOL_A,
+        "LP_MYTH_COOP_ALGO"
+      )
+    ).toBe(true);
+    expect(
+      isPortfolioHiddenToken("algorand-mainnet", POOL_A, "LP_MYTH_COOP_ALGO")
+    ).toBe(false);
+    expect(
+      isPortfolioHiddenToken("algorand-mainnet", POOL_C, "LP_MYTH_FINITE_ALGO")
+    ).toBe(false);
+  });
+
+  it("does not bake Myth LP tokens until testers set VITE_LP_MYTH_*", () => {
+    const portfolio = getPortfolioVisibleTokens("algorand-mainnet");
+    const markets = getMarketsTableVisibleTokensWithDisplayInfo(
+      "algorand-mainnet"
+    );
+    expect(
+      portfolio.some((token) =>
+        String(token.configKey ?? "").startsWith("LP_MYTH_")
+      )
+    ).toBe(false);
+    expect(
+      markets.some((token) =>
+        String(token.configKey ?? "").startsWith("LP_MYTH_")
       )
     ).toBe(false);
   });

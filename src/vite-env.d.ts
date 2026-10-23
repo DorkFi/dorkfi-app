@@ -28,6 +28,20 @@ interface ImportMetaEnv {
   /** When `true` or `1`, show Deposit / Withdraw LP actions on pool cards (Supply / Withdraw always shown). */
   readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
   /**
+   * When `true` or `1`, enable Myth dualSTAKE Supply / Withdraw and register
+   * `VITE_LP_MYTH_*` tokens. Defaults on in Vite DEV; keep unset in production.
+   * UI-only — not on-chain access control.
+   */
+  readonly VITE_ENABLE_MYTH_POOL_LENDING?: string;
+  /**
+   * Tester-listed Myth markets: `poolId,contractId,nTokenId`.
+   * Keep unset in production. poolId must be a known lending pool, never
+   * Pool A (`3333688282`) or Tinyman LP pools C/E/F.
+   */
+  readonly VITE_LP_MYTH_COOP_ALGO?: string;
+  readonly VITE_LP_MYTH_ALPHA_ALGO?: string;
+  readonly VITE_LP_MYTH_FINITE_ALGO?: string;
+  /**
    * When `true` or `1`, enable cross-asset repay via Haystack (Algorand mainnet).
    * Defaults on in Vite DEV; off in production builds unless set (safe beta dark-ship).
    */

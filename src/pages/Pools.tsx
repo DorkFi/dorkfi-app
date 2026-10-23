@@ -16,6 +16,7 @@ import {
   getPoolBaseTokenFilterAssetId,
   poolMatchesBaseTokenFilter,
   POOL_BASE_TOKEN_FILTERS,
+  resolveMythLendingPoolIdsForFilter,
   resolvePoolCWadMarket,
   resolvePoolEWadMarket,
   resolvePoolFWadMarket,
@@ -68,6 +69,13 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
     }
     if (tokenFilter === "usdc") {
       return resolveUsdcLendingPoolIdsForFilter(networkId, filteredPairs);
+    }
+    if (
+      tokenFilter === "coop" ||
+      tokenFilter === "alpha" ||
+      tokenFilter === "finite"
+    ) {
+      return resolveMythLendingPoolIdsForFilter(networkId, filteredPairs);
     }
     return [];
   }, [currentNetwork, filteredPairs, tokenFilter]);
