@@ -8,6 +8,8 @@ import {
 import {
   encodeBridgeIntentNote,
   enrichNftsForBridge,
+  bridgeSubmitOutcomeError,
+  formatBridgeFeeCurrencyError,
   formatBridgeReceiveLine,
   parseBridgeIntentNote,
 } from "@/services/nftBridgeService";
@@ -42,6 +44,36 @@ describe("bridge custody addresses", () => {
   it("uses DORKHJ for Algorand to Voi", () => {
     expect(bridgeCustodyLabel("algorand-to-voi")).toBe("DORKHJ");
     expect(bridgeCustodyAddress("algorand-to-voi")).toBe(DORK_NFT_ALGORAND_RESERVE_ADDRESS);
+  });
+});
+
+describe("bridgeSubmitOutcomeError", () => {
+  it("returns null when all groups succeed", () => {
+    expect(
+      bridgeSubmitOutcomeError({
+        failedGroupIndices: [],
+        successfulTxIds: ["tx1"],
+        totalGroups: 1,
+        feeCurrency: "ALGO",
+        custodyLabel: "DEVOUR",
+      })
+    ).toBeNull();
+  });
+
+  it("maps insufficient ALGO balance copy to VOI for Voi-network fees", () => {
+    const msg = bridgeSubmitOutcomeError({
+      failedGroupIndices: [0],
+      successfulTxIds: [],
+      totalGroups: 1,
+      firstGroupError:
+        "transaction 123: account ABC balance 1000000 below min 5000000 (0 assets)",
+      feeCurrency: "VOI",
+      custodyLabel: "DEVOUR",
+    });
+    expect(msg).toMatch(/VOI/);
+    expect(formatBridgeFeeCurrencyError("Need more ALGO for fees", "VOI")).toBe(
+      "Need more VOI for fees"
+    );
   });
 });
 

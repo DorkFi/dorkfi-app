@@ -17,6 +17,7 @@ import {
 import type { UserNFT } from "@/hooks/useUserNFTs";
 import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimService";
 import algorandService from "@/services/algorandService";
+import { getUserFriendlyError } from "@/utils/errorUtils";
 
 export type BridgeableNft = UserNFT & {
   sourceId: string;
@@ -25,6 +26,47 @@ export type BridgeableNft = UserNFT & {
   /** Confirm / success step copy for what the receiver gets on the destination chain. */
   receiveLine: string;
 };
+
+/** Map Algorand-node fee wording to Voi when the wallet pays fees in VOI. */
+export function formatBridgeFeeCurrencyError(
+  message: string,
+  currency: "VOI" | "ALGO"
+): string {
+  return currency === "VOI" ? message.replace(/\bALGO\b/g, "VOI") : message;
+}
+
+/**
+ * Returns a user-facing error when one or more signed bridge groups failed on-chain.
+ * `null` when every group confirmed.
+ */
+export function bridgeSubmitOutcomeError(args: {
+  failedGroupIndices: number[];
+  successfulTxIds: string[];
+  totalGroups: number;
+  firstGroupError?: string;
+  feeCurrency: "VOI" | "ALGO";
+  custodyLabel: string;
+}): string | null {
+  const {
+    failedGroupIndices,
+    successfulTxIds,
+    totalGroups,
+    firstGroupError,
+    feeCurrency,
+    custodyLabel,
+  } = args;
+  if (failedGroupIndices.length === 0) return null;
+
+  if (successfulTxIds.length === 0) {
+    const raw = firstGroupError ?? "Transaction could not be confirmed.";
+    return formatBridgeFeeCurrencyError(
+      getUserFriendlyError(new Error(raw)),
+      feeCurrency
+    );
+  }
+
+  return `Only ${successfulTxIds.length} of ${totalGroups} transfers reached ${custodyLabel} before one failed. Check your wallet — some NFTs may already be in custody. Try again for any that did not send, or reach out on Discord if you are unsure.`;
+}
 
 export function formatBridgeReceiveLine(
   entry: Pick<DorkNftEntry, "name" | "assetId" | "collectionName" | "voiTokenId">,

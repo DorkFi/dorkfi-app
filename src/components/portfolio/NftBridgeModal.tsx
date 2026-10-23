@@ -29,6 +29,8 @@ import {
   destinationNetworkLabel,
   enrichNftsForBridge,
   buildNftBridgeSigningBundle,
+  bridgeSubmitOutcomeError,
+  formatBridgeFeeCurrencyError,
   type BridgeableNft,
 } from "@/services/nftBridgeService";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
@@ -70,6 +72,7 @@ export default function NftBridgeModal({
   const [receiveMode, setReceiveMode] = useState<"same" | "different">("same");
   const [customReceiver, setCustomReceiver] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [destAssets, setDestAssets] = useState<
     { receiveLine: string; lineKey: string }[]
   >([]);
@@ -111,6 +114,7 @@ export default function NftBridgeModal({
       setCustomReceiver("");
       setDestAssets([]);
       setIsSubmitting(false);
+      setSubmitError(null);
     }
   }, [open]);
 
@@ -165,6 +169,7 @@ export default function NftBridgeModal({
       return;
     }
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       const bundle = await buildNftBridgeSigningBundle({
         networkId: currentNetwork as NetworkId,
@@ -184,7 +189,28 @@ export default function NftBridgeModal({
         if (!algoNet) throw new Error("Unsupported network.");
         const { algod } = await algorandService.initializeClientsForReads(algoNet);
 
-        await submitSignedGroups({ algod, signedGroups });
+        let firstGroupError: string | undefined;
+        const submitResult = await submitSignedGroups({
+          algod,
+          signedGroups,
+          onGroupSubmitted: (result) => {
+            if (result.error && firstGroupError === undefined) {
+              firstGroupError = result.error;
+            }
+          },
+        });
+
+        const submitErr = bridgeSubmitOutcomeError({
+          failedGroupIndices: submitResult.failedGroups,
+          successfulTxIds: submitResult.successfulTxIds,
+          totalGroups: signedGroups.length,
+          firstGroupError,
+          feeCurrency: registrationCurrency,
+          custodyLabel,
+        });
+        if (submitErr) {
+          throw new Error(submitErr);
+        }
       }
 
       setDestAssets(bundle.destAssetsForReceiver);
@@ -197,9 +223,14 @@ export default function NftBridgeModal({
       });
     } catch (err) {
       const feedback = getTransactionErrorFeedback(err);
+      const description = formatBridgeFeeCurrencyError(
+        feedback.message,
+        registrationCurrency
+      );
+      setSubmitError(description);
       toast({
         title: feedback.userRejected ? "Transaction cancelled" : "Bridge failed",
-        description: feedback.message,
+        description,
         variant: "destructive",
       });
     } finally {
@@ -397,6 +428,14 @@ export default function NftBridgeModal({
 
           {step === "confirm" && (
             <div className="space-y-4 text-sm leading-relaxed">
+              {submitError && (
+                <p
+                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  {submitError}
+                </p>
+              )}
               {bridgeDryRun && (
                 <p className="text-justify text-xs text-amber-600 dark:text-amber-400">
                   Dry run — Sign &amp; send will not open your wallet or broadcast transactions.
