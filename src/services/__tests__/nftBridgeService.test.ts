@@ -8,6 +8,7 @@ import {
 import {
   encodeBridgeIntentNote,
   enrichNftsForBridge,
+  formatBridgeReceiveLine,
   parseBridgeIntentNote,
 } from "@/services/nftBridgeService";
 
@@ -60,6 +61,27 @@ describe("enrichNftsForBridge", () => {
     expect(enriched).toHaveLength(1);
     expect(enriched[0]?.destAssetId).toBe("3600686574");
     expect(enriched[0]?.destAssetLabel).toBe("ASA");
+    expect(enriched[0]?.receiveNumber).toBe("3600686574");
     expect(enriched[0]?.sourceId).toBe("arc72:313597:1");
+    expect(formatBridgeReceiveLine("DORK 1", "ASA", "3600686574")).toBe(
+      "DORK 1 - ASA 3600686574"
+    );
+  });
+
+  it("maps Algorand ASAs to VSA token numbers for Voi", () => {
+    const enriched = enrichNftsForBridge(
+      [
+        {
+          contractId: 313597,
+          tokenId: "1",
+          name: "DORK 1",
+          imageUrl: "",
+        },
+      ],
+      "algorand-to-voi"
+    );
+    expect(enriched[0]?.destAssetLabel).toBe("VSA");
+    expect(enriched[0]?.receiveNumber).toBe("1");
+    expect(formatBridgeReceiveLine("DORK 1", "VSA", "1")).toBe("DORK 1 - VSA 1");
   });
 });

@@ -29,6 +29,7 @@ import {
   destinationNetworkLabel,
   enrichNftsForBridge,
   buildNftBridgeSigningBundle,
+  formatBridgeReceiveLine,
   type BridgeableNft,
 } from "@/services/nftBridgeService";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
@@ -67,7 +68,7 @@ export default function NftBridgeModal({
   const [customReceiver, setCustomReceiver] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [destAssets, setDestAssets] = useState<
-    { name: string; kind: "ASA" | "VSA"; lineKey: string }[]
+    { name: string; kind: "ASA" | "VSA"; receiveNumber: string; lineKey: string }[]
   >([]);
 
   const direction = bridgeDirectionForNetwork(currentNetwork as NetworkId);
@@ -418,7 +419,7 @@ export default function NftBridgeModal({
                 <ul className="space-y-1.5">
                   {selectedNfts.map((nft) => (
                     <li key={nftKey(nft)} className="text-sm">
-                      {nft.name} - {nft.destAssetLabel}
+                      {formatBridgeReceiveLine(nft.name, nft.destAssetLabel, nft.receiveNumber)}
                     </li>
                   ))}
                 </ul>
@@ -452,7 +453,7 @@ export default function NftBridgeModal({
                   <ul className="space-y-1.5">
                     {destAssets.map((row) => (
                       <li key={row.lineKey} className="text-sm">
-                        {row.name} - {row.kind}
+                        {formatBridgeReceiveLine(row.name, row.kind, row.receiveNumber)}
                       </li>
                     ))}
                   </ul>

@@ -22,7 +22,17 @@ export type BridgeableNft = UserNFT & {
   destAssetId: string;
   /** User-facing receive type: ASA or VSA. */
   destAssetLabel: "ASA" | "VSA";
+  /** ASA asset id (Algorand) or Voi token id (VSA) for the user-facing line. */
+  receiveNumber: string;
 };
+
+export function formatBridgeReceiveLine(
+  name: string,
+  kind: "ASA" | "VSA",
+  receiveNumber: string
+): string {
+  return `${name} - ${kind} ${receiveNumber}`;
+}
 
 export function bridgeDirectionForNetwork(
   networkId: NetworkId
@@ -53,6 +63,7 @@ export function enrichNftsForBridge(
         sourceId: `arc72:${nft.contractId}:${nft.tokenId}`,
         destAssetId: String(entry.assetId),
         destAssetLabel: receiveKind,
+        receiveNumber: String(entry.assetId),
       });
     } else {
       out.push({
@@ -60,6 +71,7 @@ export function enrichNftsForBridge(
         sourceId: String(entry.assetId),
         destAssetId: `${entry.voiContractId}:${entry.voiTokenId}`,
         destAssetLabel: receiveKind,
+        receiveNumber: String(entry.voiTokenId),
       });
     }
   }
@@ -222,7 +234,12 @@ export type NftBridgeSigningBundle = {
   unsignedFlat: Uint8Array[];
   groupSizes: number[];
   preparedGroups: Uint8Array[][];
-  destAssetsForReceiver: { name: string; kind: "ASA" | "VSA"; lineKey: string }[];
+  destAssetsForReceiver: {
+    name: string;
+    kind: "ASA" | "VSA";
+    receiveNumber: string;
+    lineKey: string;
+  }[];
 };
 
 export async function buildNftBridgeSigningBundle(args: {
@@ -269,6 +286,7 @@ export async function buildNftBridgeSigningBundle(args: {
   const destAssetsForReceiver = selected.map((nft) => ({
     name: nft.name,
     kind: nft.destAssetLabel,
+    receiveNumber: nft.receiveNumber,
     lineKey: `${nft.contractId}-${nft.tokenId}`,
   }));
 
