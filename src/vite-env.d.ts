@@ -42,4 +42,9 @@ interface ImportMetaEnv {
   readonly VITE_X_SHARE_API_BASE?: string;
   /** Local share-server target for the Vite `/api/x-share` proxy (default `http://127.0.0.1:8788`). */
   readonly VITE_X_SHARE_LOCAL_TARGET?: string;
+  /**
+   * NFT bridge dry run: build txs but skip wallet sign/submit.
+   * Defaults on in Vite DEV unless `false` or `0`.
+   */
+  readonly VITE_NFT_BRIDGE_DRY_RUN?: string;
 }

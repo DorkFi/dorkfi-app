@@ -22,6 +22,7 @@ import { filterUserNfts } from "@/components/liquidation/filterUserNfts";
 import {
   bridgeCustodyLabel,
   bridgeRegistrationCurrencyLabel,
+  isNftBridgeDryRun,
 } from "@/config/nftBridge";
 import {
   bridgeDirectionForNetwork,
@@ -71,6 +72,7 @@ export default function NftBridgeModal({
   const destNetwork = destinationNetworkLabel(direction);
   const sourceNetwork = currentNetwork === "voi-mainnet" ? "Voi" : "Algorand";
   const custodyLabel = bridgeCustodyLabel(direction);
+  const bridgeDryRun = isNftBridgeDryRun();
   const registrationCurrency =
     currentNetwork === "voi-mainnet" || currentNetwork === "algorand-mainnet"
       ? bridgeRegistrationCurrencyLabel(currentNetwork)
@@ -148,7 +150,7 @@ export default function NftBridgeModal({
   };
 
   const handleSignAndSend = async () => {
-    if (!signTransactions) {
+    if (!bridgeDryRun && !signTransactions) {
       toast({
         title: "Wallet required",
         description: "Connect a wallet to sign bridge transactions.",
@@ -165,23 +167,27 @@ export default function NftBridgeModal({
         selected: selectedNfts,
       });
 
-      const signingBatches = createSigningBatchesFromEncoded(bundle.preparedGroups);
-      const { signedGroups } = await signAllEncodedBatches(
-        signingBatches,
-        signTransactions
-      );
+      if (!bridgeDryRun) {
+        const signingBatches = createSigningBatchesFromEncoded(bundle.preparedGroups);
+        const { signedGroups } = await signAllEncodedBatches(
+          signingBatches,
+          signTransactions!
+        );
 
-      const algoNet = getAlgorandNetworkFromNetworkId(currentNetwork as NetworkId);
-      if (!algoNet) throw new Error("Unsupported network.");
-      const { algod } = await algorandService.initializeClientsForReads(algoNet);
+        const algoNet = getAlgorandNetworkFromNetworkId(currentNetwork as NetworkId);
+        if (!algoNet) throw new Error("Unsupported network.");
+        const { algod } = await algorandService.initializeClientsForReads(algoNet);
 
-      await submitSignedGroups({ algod, signedGroups });
+        await submitSignedGroups({ algod, signedGroups });
+      }
 
       setDestAssets(bundle.destAssetsForReceiver);
       setStep("success");
       toast({
-        title: "Bridge submitted",
-        description: `Your NFTs were sent to ${custodyLabel}. Our team will complete the bridge.`,
+        title: bridgeDryRun ? "Dry run complete" : "Bridge submitted",
+        description: bridgeDryRun
+          ? "Transactions were built but not signed or submitted."
+          : `Your NFTs were sent to ${custodyLabel}. Our team will complete the bridge.`,
       });
     } catch (err) {
       const feedback = getTransactionErrorFeedback(err);
@@ -332,11 +338,9 @@ export default function NftBridgeModal({
                 on {destNetwork}.
               </p>
               {direction === "algorand-to-voi" && (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  On Algorand, your ASA goes to{" "}
-                  <span className="font-medium text-foreground">DORKHJ</span> — the creator reserve
-                  wallet opted in to every Dork ASA. Same bridge process as DEVOUR on Voi; the team
-                  still releases your matching NFT on Voi from DEVOUR.
+                <p className="text-justify text-sm leading-snug text-muted-foreground">
+                  ASAs go to DORKHJ on Algorand. Your matching Voi NFT is released from DEVOUR
+                  when we process the bridge.
                 </p>
               )}
               <RadioGroup
@@ -380,6 +384,11 @@ export default function NftBridgeModal({
 
           {step === "confirm" && (
             <div className="space-y-4 text-sm leading-relaxed">
+              {bridgeDryRun && (
+                <p className="text-justify text-xs text-amber-600 dark:text-amber-400">
+                  Dry run — Sign &amp; send will not open your wallet or broadcast transactions.
+                </p>
+              )}
               <p className="text-muted-foreground">
                 Sign{" "}
                 <span className="font-medium text-foreground">{selectedNfts.length}</span>{" "}
