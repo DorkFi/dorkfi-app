@@ -19,6 +19,13 @@ export type NftBridgeIntentItem = {
   name: string;
 };
 
+/** Native unit for the 0-amount registration payment grouped with each bridge transfer. */
+export function bridgeRegistrationCurrencyLabel(
+  networkId: "voi-mainnet" | "algorand-mainnet"
+): "VOI" | "ALGO" {
+  return networkId === "voi-mainnet" ? "VOI" : "ALGO";
+}
+
 export type NftBridgeIntentPayload = {
   v: 1;
   dir: NftBridgeDirection;

@@ -12085,8 +12085,8 @@ export default function AdminDashboard() {
                   Dork NFT bridge (DEVOUR / DORKHJ)
                 </CardTitle>
                 <CardDescription>
-                  Scan registration notes sent to DEVOUR and release matching NFTs from DORKHJ
-                  (Voi → Algorand) or DEVOUR on Voi (Algorand → Voi).
+                  Read-only log of bridge registration notes on DEVOUR (Voi and Algorand). Custody
+                  release is operated from the local engagement dashboard, not this app.
                 </CardDescription>
               </CardHeader>
               <CardContent>

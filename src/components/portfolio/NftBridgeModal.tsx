@@ -19,6 +19,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import type { NetworkId } from "@/config";
 import { useUserNFTs } from "@/hooks/useUserNFTs";
 import { filterUserNfts } from "@/components/liquidation/filterUserNfts";
+import { bridgeRegistrationCurrencyLabel } from "@/config/nftBridge";
 import {
   bridgeDirectionForNetwork,
   destinationNetworkLabel,
@@ -64,6 +65,10 @@ export default function NftBridgeModal({
 
   const direction = bridgeDirectionForNetwork(currentNetwork as NetworkId);
   const destNetwork = destinationNetworkLabel(direction);
+  const registrationCurrency =
+    currentNetwork === "voi-mainnet" || currentNetwork === "algorand-mainnet"
+      ? bridgeRegistrationCurrencyLabel(currentNetwork)
+      : "ALGO";
 
   const bridgeable = useMemo(
     () => enrichNftsForBridge(nfts ?? [], direction),
@@ -291,8 +296,9 @@ export default function NftBridgeModal({
             <p>
               You will sign{" "}
               <strong>{selectedNfts.length}</strong> transfer
-              {selectedNfts.length === 1 ? "" : "s"} to DEVOUR plus registration data for the
-              team.
+              {selectedNfts.length === 1 ? "" : "s"} to DEVOUR, each grouped with a{" "}
+              <strong>0 {registrationCurrency}</strong> payment to DEVOUR that carries registration
+              data for the team (network fees still apply in {registrationCurrency}).
             </p>
             <ul className="max-h-40 list-inside list-disc overflow-y-auto text-muted-foreground">
               {selectedNfts.map((nft) => (

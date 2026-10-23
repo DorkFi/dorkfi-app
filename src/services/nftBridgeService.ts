@@ -2,16 +2,14 @@ import algosdk, { type Algodv2, type Indexer } from "algosdk";
 import type { NetworkId } from "@/config";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
 import {
-  DORK_NFT_ALGORAND_RESERVE_ADDRESS,
   DORK_NFT_BRIDGE_ADDRESS,
   NFT_BRIDGE_NOTE_PREFIX,
   type NftBridgeDirection,
   type NftBridgeIntentItem,
   type NftBridgeIntentPayload,
 } from "@/config/nftBridge";
-import { getDorkNftByAssetId, getDorkNftByVoi } from "@/data/dorkNftAlgorandRegistry";
+import { getDorkNftByVoi } from "@/data/dorkNftAlgorandRegistry";
 import type { UserNFT } from "@/hooks/useUserNFTs";
-import { groupTransactions } from "@/lib/algorand/grouping";
 import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimService";
 import algorandService from "@/services/algorandService";
 
@@ -166,6 +164,7 @@ async function buildVoiBridgeGroupForNft(
     sender,
     items: bridgeIntentItemsFromSelection([nft]),
   });
+  /** 0 VOI payment — carries bridge intent note; fees are paid in VOI on Voi mainnet. */
   const registration = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
     sender,
     receiver: DORK_NFT_BRIDGE_ADDRESS,
@@ -207,6 +206,7 @@ async function buildAlgorandBridgeGroupForNft(
     sender,
     items: bridgeIntentItemsFromSelection([nft]),
   });
+  /** 0 ALGO payment — carries bridge intent note; fees are paid in ALGO on Algorand mainnet. */
   const registration = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
     sender,
     receiver: DORK_NFT_BRIDGE_ADDRESS,
@@ -293,6 +293,8 @@ export function flattenBridgeGroupsForSigning(
 export type ParsedBridgeIntent = NftBridgeIntentPayload & {
   txId: string;
   round: number;
+  /** Chain where the registration payment landed (same as the user’s bridge source network). */
+  sourceNetworkId: NetworkId;
 };
 
 export async function fetchPendingBridgeIntents(
@@ -329,91 +331,8 @@ export async function fetchPendingBridgeIntents(
       ...parsed,
       txId: row.id ?? "",
       round: row["confirmed-round"] ?? 0,
+      sourceNetworkId: networkId,
     });
   }
   return out;
-}
-
-/** Operator release: Voi → Algorand sends ASA from DORKHJ reserve to the receiver. */
-async function buildAlgorandReleaseGroup(
-  assetId: number,
-  receiver: string,
-  reserveSender: string,
-  algod: Algodv2
-): Promise<algosdk.Transaction[]> {
-  const params = normalizeSuggestedParams(await algod.getTransactionParams().do());
-  const axfer = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
-    sender: reserveSender,
-    receiver,
-    assetIndex: assetId,
-    amount: 1n,
-    suggestedParams: { ...params, flatFee: true, fee: 2000n },
-  });
-  return [axfer];
-}
-
-export async function buildBridgeReleaseSigningBundle(args: {
-  networkId: NetworkId;
-  operatorAddress: string;
-  intent: NftBridgeIntentPayload;
-  item: NftBridgeIntentItem;
-}): Promise<Uint8Array[][]> {
-  const { networkId, operatorAddress, intent, item } = args;
-  const algoNet = getAlgorandNetworkFromNetworkId(networkId);
-  if (!algoNet) throw new Error("Unsupported network.");
-
-  const { algod, indexer } = await algorandService.initializeClientsForReads(algoNet);
-  let txns: algosdk.Transaction[] = [];
-
-  if (intent.dir === "voi-to-algorand") {
-    if (
-      operatorAddress.toUpperCase() !== DORK_NFT_ALGORAND_RESERVE_ADDRESS.toUpperCase()
-    ) {
-      throw new Error("Connect the DORKHJ reserve wallet on Algorand to release.");
-    }
-    const assetId = Number(item.destAssetId);
-    if (!Number.isFinite(assetId)) throw new Error("Invalid destination ASA id.");
-    txns = await buildAlgorandReleaseGroup(
-      assetId,
-      intent.receiver,
-      operatorAddress,
-      algod
-    );
-  } else {
-    if (operatorAddress.toUpperCase() !== DORK_NFT_BRIDGE_ADDRESS.toUpperCase()) {
-      throw new Error("Connect the DEVOUR wallet on Voi to release.");
-    }
-    const entry =
-      getDorkNftByAssetId(Number(item.sourceId)) ??
-      getDorkNftByVoi(
-        Number(item.destAssetId.split(":")[0]),
-        Number(item.destAssetId.split(":")[1])
-      );
-    if (!entry) throw new Error("Could not resolve Voi NFT for release.");
-    const Arc72 = (await import("ulujs/impl/arc72/index.js")).default;
-    const contract = new Arc72(entry.voiContractId, algod, indexer, {
-      simulate: true,
-      acc: { addr: operatorAddress },
-    });
-    const result = await contract.arc72_transferFrom(
-      operatorAddress,
-      intent.receiver,
-      BigInt(entry.voiTokenId),
-      true,
-      false
-    );
-    if (!result?.success || !Array.isArray(result.txns)) {
-      throw new Error("Could not build Voi release transfer.");
-    }
-    txns = (result.txns as string[]).map((b64) =>
-      algosdk.decodeUnsignedTransaction(
-        Uint8Array.from(Buffer.from(b64, "base64"))
-      )
-    );
-  }
-
-  const groups = groupTransactions(txns);
-  return groups.map((group) =>
-    group.map((txn) => algosdk.encodeUnsignedTransaction(txn))
-  );
 }
