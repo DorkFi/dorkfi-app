@@ -55,13 +55,13 @@ describe("formatBridgeReceiveLine", () => {
 
   it("shows ASA id on Algorand destination", () => {
     expect(formatBridgeReceiveLine(entry, "voi-to-algorand")).toBe(
-      "DORK 1 — ASA 3600686574"
+      "DORK 1 → ASA 3600686574"
     );
   });
 
   it("shows collection and item number on Voi destination", () => {
     expect(formatBridgeReceiveLine(entry, "algorand-to-voi")).toBe(
-      "DORK 1 — Dorks v1 #1"
+      "DORK 1 → Dorks v1 #1"
     );
   });
 });
@@ -81,7 +81,7 @@ describe("enrichNftsForBridge", () => {
     );
     expect(enriched).toHaveLength(1);
     expect(enriched[0]?.destAssetId).toBe("3600686574");
-    expect(enriched[0]?.receiveLine).toBe("DORK 1 — ASA 3600686574");
+    expect(enriched[0]?.receiveLine).toBe("DORK 1 → ASA 3600686574");
     expect(enriched[0]?.sourceId).toBe("arc72:313597:1");
   });
 
@@ -97,7 +97,7 @@ describe("enrichNftsForBridge", () => {
       ],
       "algorand-to-voi"
     );
-    expect(enriched[0]?.receiveLine).toBe("DORK 1 — Dorks v1 #1");
+    expect(enriched[0]?.receiveLine).toBe("DORK 1 → Dorks v1 #1");
     expect(enriched[0]?.destAssetId).toBe("313597:1");
   });
 });

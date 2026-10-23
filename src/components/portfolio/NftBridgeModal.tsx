@@ -262,7 +262,9 @@ export default function NftBridgeModal({
           <DialogTitle className="text-center sm:text-left">Bridge Dork NFTs</DialogTitle>
           <DialogDescription className="text-center sm:text-left">
             {step === "success"
-              ? `Submitted to ${custodyLabel} — opt in on the destination chain when you receive asset numbers.`
+              ? direction === "voi-to-algorand"
+                ? `Submitted to ${custodyLabel}. Opt in on Algorand when we send your ASA numbers.`
+                : `Submitted to ${custodyLabel}. We will release your NFTs on Voi when we process the bridge.`
               : `Send from ${sourceNetwork} and receive on ${destNetwork}.`}
           </DialogDescription>
         </DialogHeader>
@@ -413,12 +415,12 @@ export default function NftBridgeModal({
               </p>
               <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  NFTs
+                  You&apos;re signing away
                 </p>
                 <ul className="space-y-1.5">
                   {selectedNfts.map((nft) => (
                     <li key={nftKey(nft)} className="text-sm">
-                      {nft.receiveLine}
+                      {nft.name}
                     </li>
                   ))}
                 </ul>
@@ -446,8 +448,8 @@ export default function NftBridgeModal({
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                   <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {direction === "voi-to-algorand"
-                      ? "Opt in on Algorand when we send"
-                      : "Receiving on Voi"}
+                      ? "Receive on Algorand (opt in to ASA)"
+                      : `Receive on ${destNetwork}`}
                   </p>
                   <ul className="space-y-1.5">
                     {destAssets.map((row) => (

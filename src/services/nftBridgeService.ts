@@ -31,9 +31,9 @@ export function formatBridgeReceiveLine(
   direction: NftBridgeDirection
 ): string {
   if (direction === "voi-to-algorand") {
-    return `${entry.name} — ASA ${entry.assetId}`;
+    return `${entry.name} → ASA ${entry.assetId}`;
   }
-  return `${entry.name} — ${entry.collectionName} #${entry.voiTokenId}`;
+  return `${entry.name} → ${entry.collectionName} #${entry.voiTokenId}`;
 }
 
 export function bridgeDirectionForNetwork(
