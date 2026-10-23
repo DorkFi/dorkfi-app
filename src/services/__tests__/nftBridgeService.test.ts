@@ -45,6 +45,27 @@ describe("bridge custody addresses", () => {
   });
 });
 
+describe("formatBridgeReceiveLine", () => {
+  const entry = {
+    name: "DORK 1",
+    assetId: 3600686574,
+    collectionName: "Dorks v1",
+    voiTokenId: 1,
+  };
+
+  it("shows ASA id on Algorand destination", () => {
+    expect(formatBridgeReceiveLine(entry, "voi-to-algorand")).toBe(
+      "DORK 1 — ASA 3600686574"
+    );
+  });
+
+  it("shows collection and item number on Voi destination", () => {
+    expect(formatBridgeReceiveLine(entry, "algorand-to-voi")).toBe(
+      "DORK 1 — Dorks v1 #1"
+    );
+  });
+});
+
 describe("enrichNftsForBridge", () => {
   it("maps Voi NFTs to Algorand ASA ids", () => {
     const enriched = enrichNftsForBridge(
@@ -60,15 +81,11 @@ describe("enrichNftsForBridge", () => {
     );
     expect(enriched).toHaveLength(1);
     expect(enriched[0]?.destAssetId).toBe("3600686574");
-    expect(enriched[0]?.destAssetLabel).toBe("ASA");
-    expect(enriched[0]?.receiveNumber).toBe("3600686574");
+    expect(enriched[0]?.receiveLine).toBe("DORK 1 — ASA 3600686574");
     expect(enriched[0]?.sourceId).toBe("arc72:313597:1");
-    expect(formatBridgeReceiveLine("DORK 1", "ASA", "3600686574")).toBe(
-      "DORK 1 - ASA 3600686574"
-    );
   });
 
-  it("leaves VSA asset id empty until vsa registry is populated", () => {
+  it("maps Algorand ASAs to Voi collection and token id", () => {
     const enriched = enrichNftsForBridge(
       [
         {
@@ -80,8 +97,7 @@ describe("enrichNftsForBridge", () => {
       ],
       "algorand-to-voi"
     );
-    expect(enriched[0]?.destAssetLabel).toBe("VSA");
-    expect(enriched[0]?.receiveNumber).toBeNull();
-    expect(formatBridgeReceiveLine("DORK 1", "VSA", null)).toBe("DORK 1 - VSA");
+    expect(enriched[0]?.receiveLine).toBe("DORK 1 — Dorks v1 #1");
+    expect(enriched[0]?.destAssetId).toBe("313597:1");
   });
 });

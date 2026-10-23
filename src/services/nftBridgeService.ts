@@ -3,7 +3,6 @@ import type { NetworkId } from "@/config";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
 import {
   bridgeCustodyAddress,
-  bridgeDestinationKind,
   bridgeRegistrationLogAddresses,
   DORK_NFT_BRIDGE_ADDRESS,
   NFT_BRIDGE_NOTE_PREFIX,
@@ -11,8 +10,10 @@ import {
   type NftBridgeIntentItem,
   type NftBridgeIntentPayload,
 } from "@/config/nftBridge";
-import { getDorkNftByVoi } from "@/data/dorkNftAlgorandRegistry";
-import { getDorkVsaAssetId } from "@/data/dorkNftVsaRegistry";
+import {
+  getDorkNftByVoi,
+  type DorkNftEntry,
+} from "@/data/dorkNftAlgorandRegistry";
 import type { UserNFT } from "@/hooks/useUserNFTs";
 import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimService";
 import algorandService from "@/services/algorandService";
@@ -21,32 +22,18 @@ export type BridgeableNft = UserNFT & {
   sourceId: string;
   /** On-chain id in bridge registration notes (ASA id or Voi contract:token). */
   destAssetId: string;
-  /** User-facing receive type: ASA or VSA. */
-  destAssetLabel: "ASA" | "VSA";
-  /** ASA or VSA network asset id for the user-facing line (not ARC-72 token index). */
-  receiveNumber: string | null;
+  /** Confirm / success step copy for what the receiver gets on the destination chain. */
+  receiveLine: string;
 };
 
-export function resolveBridgeReceiveAssetNumber(
-  entry: NonNullable<ReturnType<typeof getDorkNftByVoi>>,
-  direction: NftBridgeDirection
-): string | null {
-  if (direction === "voi-to-algorand") {
-    return String(entry.assetId);
-  }
-  const vsa = getDorkVsaAssetId(entry.voiContractId, entry.voiTokenId);
-  return vsa != null ? String(vsa) : null;
-}
-
 export function formatBridgeReceiveLine(
-  name: string,
-  kind: "ASA" | "VSA",
-  receiveNumber: string | null
+  entry: Pick<DorkNftEntry, "name" | "assetId" | "collectionName" | "voiTokenId">,
+  direction: NftBridgeDirection
 ): string {
-  if (receiveNumber) {
-    return `${name} - ${kind} ${receiveNumber}`;
+  if (direction === "voi-to-algorand") {
+    return `${entry.name} — ASA ${entry.assetId}`;
   }
-  return `${name} - ${kind}`;
+  return `${entry.name} — ${entry.collectionName} #${entry.voiTokenId}`;
 }
 
 export function bridgeDirectionForNetwork(
@@ -71,23 +58,20 @@ export function enrichNftsForBridge(
   for (const nft of nfts) {
     const entry = getDorkNftByVoi(nft.contractId, Number(nft.tokenId));
     if (!entry) continue;
-    const receiveKind = bridgeDestinationKind(direction);
-    const receiveNumber = resolveBridgeReceiveAssetNumber(entry, direction);
+    const receiveLine = formatBridgeReceiveLine(entry, direction);
     if (direction === "voi-to-algorand") {
       out.push({
         ...nft,
         sourceId: `arc72:${nft.contractId}:${nft.tokenId}`,
         destAssetId: String(entry.assetId),
-        destAssetLabel: receiveKind,
-        receiveNumber,
+        receiveLine,
       });
     } else {
       out.push({
         ...nft,
         sourceId: String(entry.assetId),
         destAssetId: `${entry.voiContractId}:${entry.voiTokenId}`,
-        destAssetLabel: receiveKind,
-        receiveNumber,
+        receiveLine,
       });
     }
   }
@@ -251,9 +235,7 @@ export type NftBridgeSigningBundle = {
   groupSizes: number[];
   preparedGroups: Uint8Array[][];
   destAssetsForReceiver: {
-    name: string;
-    kind: "ASA" | "VSA";
-    receiveNumber: string;
+    receiveLine: string;
     lineKey: string;
   }[];
 };
@@ -300,9 +282,7 @@ export async function buildNftBridgeSigningBundle(args: {
   const unsignedFlat = preparedGroups.flat();
 
   const destAssetsForReceiver = selected.map((nft) => ({
-    name: nft.name,
-    kind: nft.destAssetLabel,
-    receiveNumber: nft.receiveNumber,
+    receiveLine: nft.receiveLine,
     lineKey: `${nft.contractId}-${nft.tokenId}`,
   }));
 

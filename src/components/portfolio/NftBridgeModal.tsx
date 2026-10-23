@@ -29,7 +29,6 @@ import {
   destinationNetworkLabel,
   enrichNftsForBridge,
   buildNftBridgeSigningBundle,
-  formatBridgeReceiveLine,
   type BridgeableNft,
 } from "@/services/nftBridgeService";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
@@ -68,7 +67,7 @@ export default function NftBridgeModal({
   const [customReceiver, setCustomReceiver] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [destAssets, setDestAssets] = useState<
-    { name: string; kind: "ASA" | "VSA"; receiveNumber: string | null; lineKey: string }[]
+    { receiveLine: string; lineKey: string }[]
   >([]);
 
   const direction = bridgeDirectionForNetwork(currentNetwork as NetworkId);
@@ -419,7 +418,7 @@ export default function NftBridgeModal({
                 <ul className="space-y-1.5">
                   {selectedNfts.map((nft) => (
                     <li key={nftKey(nft)} className="text-sm">
-                      {formatBridgeReceiveLine(nft.name, nft.destAssetLabel, nft.receiveNumber)}
+                      {nft.receiveLine}
                     </li>
                   ))}
                 </ul>
@@ -447,13 +446,13 @@ export default function NftBridgeModal({
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                   <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {direction === "voi-to-algorand"
-                      ? "Opt in on Algorand when we send asset numbers"
-                      : "Matching on Voi"}
+                      ? "Opt in on Algorand when we send"
+                      : "Receiving on Voi"}
                   </p>
                   <ul className="space-y-1.5">
                     {destAssets.map((row) => (
                       <li key={row.lineKey} className="text-sm">
-                        {formatBridgeReceiveLine(row.name, row.kind, row.receiveNumber)}
+                        {row.receiveLine}
                       </li>
                     ))}
                   </ul>

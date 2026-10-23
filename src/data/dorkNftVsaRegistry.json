@@ -1,4 +1,0 @@
-{
-  "_generated": "Voi VSA (standard asset) ids for bridged Dork NFTs — keyed by voiContractId:voiTokenId. Populate from bridge/engagement exports (not ARC-72 token index).",
-  "byCanonical": {}
-}
