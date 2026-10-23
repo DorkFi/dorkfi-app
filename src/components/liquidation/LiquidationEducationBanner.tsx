@@ -38,7 +38,7 @@ export default function LiquidationEducationBanner() {
           <DorkFiButton
             variant="primary"
             className="flex items-center gap-2 px-6"
-            onClick={() => window.open('https://docs.dork.fi/liquidations', '_blank', 'noopener,noreferrer')}
+            onClick={() => window.open('https://docs.dork.fi/liquidation-markets', '_blank', 'noopener,noreferrer')}
             aria-label="Learn more about liquidations (opens in new tab)"
           >
             Learn More

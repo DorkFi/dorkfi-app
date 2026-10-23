@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { haystackProxyPlugin } from "./vite/haystackProxyPlugin";
+import { spaRouteIndexCopies } from "./vite/spaRouteIndexCopies";
 
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
@@ -60,6 +61,7 @@ export default defineConfig(({ mode }) => {
   plugins: [
     react(),
     haystackProxyPlugin(env),
+    spaRouteIndexCopies(),
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),
