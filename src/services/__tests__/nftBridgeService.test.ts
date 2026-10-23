@@ -68,7 +68,7 @@ describe("enrichNftsForBridge", () => {
     );
   });
 
-  it("maps Algorand ASAs to VSA token numbers for Voi", () => {
+  it("leaves VSA asset id empty until vsa registry is populated", () => {
     const enriched = enrichNftsForBridge(
       [
         {
@@ -81,7 +81,7 @@ describe("enrichNftsForBridge", () => {
       "algorand-to-voi"
     );
     expect(enriched[0]?.destAssetLabel).toBe("VSA");
-    expect(enriched[0]?.receiveNumber).toBe("1");
-    expect(formatBridgeReceiveLine("DORK 1", "VSA", "1")).toBe("DORK 1 - VSA 1");
+    expect(enriched[0]?.receiveNumber).toBeNull();
+    expect(formatBridgeReceiveLine("DORK 1", "VSA", null)).toBe("DORK 1 - VSA");
   });
 });

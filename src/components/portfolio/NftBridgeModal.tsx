@@ -68,7 +68,7 @@ export default function NftBridgeModal({
   const [customReceiver, setCustomReceiver] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [destAssets, setDestAssets] = useState<
-    { name: string; kind: "ASA" | "VSA"; receiveNumber: string; lineKey: string }[]
+    { name: string; kind: "ASA" | "VSA"; receiveNumber: string | null; lineKey: string }[]
   >([]);
 
   const direction = bridgeDirectionForNetwork(currentNetwork as NetworkId);

@@ -12,6 +12,7 @@ import {
   type NftBridgeIntentPayload,
 } from "@/config/nftBridge";
 import { getDorkNftByVoi } from "@/data/dorkNftAlgorandRegistry";
+import { getDorkVsaAssetId } from "@/data/dorkNftVsaRegistry";
 import type { UserNFT } from "@/hooks/useUserNFTs";
 import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimService";
 import algorandService from "@/services/algorandService";
@@ -22,16 +23,30 @@ export type BridgeableNft = UserNFT & {
   destAssetId: string;
   /** User-facing receive type: ASA or VSA. */
   destAssetLabel: "ASA" | "VSA";
-  /** ASA asset id (Algorand) or Voi token id (VSA) for the user-facing line. */
-  receiveNumber: string;
+  /** ASA or VSA network asset id for the user-facing line (not ARC-72 token index). */
+  receiveNumber: string | null;
 };
+
+export function resolveBridgeReceiveAssetNumber(
+  entry: NonNullable<ReturnType<typeof getDorkNftByVoi>>,
+  direction: NftBridgeDirection
+): string | null {
+  if (direction === "voi-to-algorand") {
+    return String(entry.assetId);
+  }
+  const vsa = getDorkVsaAssetId(entry.voiContractId, entry.voiTokenId);
+  return vsa != null ? String(vsa) : null;
+}
 
 export function formatBridgeReceiveLine(
   name: string,
   kind: "ASA" | "VSA",
-  receiveNumber: string
+  receiveNumber: string | null
 ): string {
-  return `${name} - ${kind} ${receiveNumber}`;
+  if (receiveNumber) {
+    return `${name} - ${kind} ${receiveNumber}`;
+  }
+  return `${name} - ${kind}`;
 }
 
 export function bridgeDirectionForNetwork(
@@ -57,13 +72,14 @@ export function enrichNftsForBridge(
     const entry = getDorkNftByVoi(nft.contractId, Number(nft.tokenId));
     if (!entry) continue;
     const receiveKind = bridgeDestinationKind(direction);
+    const receiveNumber = resolveBridgeReceiveAssetNumber(entry, direction);
     if (direction === "voi-to-algorand") {
       out.push({
         ...nft,
         sourceId: `arc72:${nft.contractId}:${nft.tokenId}`,
         destAssetId: String(entry.assetId),
         destAssetLabel: receiveKind,
-        receiveNumber: String(entry.assetId),
+        receiveNumber,
       });
     } else {
       out.push({
@@ -71,7 +87,7 @@ export function enrichNftsForBridge(
         sourceId: String(entry.assetId),
         destAssetId: `${entry.voiContractId}:${entry.voiTokenId}`,
         destAssetLabel: receiveKind,
-        receiveNumber: String(entry.voiTokenId),
+        receiveNumber,
       });
     }
   }
