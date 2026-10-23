@@ -52,6 +52,28 @@ function nftKey(nft: BridgeableNft): string {
 const bridgeSummaryListGrid =
   "grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3 md:grid-cols-4";
 
+function BridgeDryRunBanner({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-900 dark:text-amber-200",
+        className
+      )}
+      role="status"
+    >
+      <p className="font-semibold uppercase tracking-wide">Dry-run mode — not live</p>
+      <p className="mt-1 text-justify">
+        Sign &amp; send only builds transactions. Nothing is signed or broadcast on-chain. For real
+        ALGO ↔ VOI tests, set{" "}
+        <code className="rounded bg-background/80 px-1 py-0.5">VITE_NFT_BRIDGE_DRY_RUN=false</code>{" "}
+        in <code className="rounded bg-background/80 px-1 py-0.5">.env.local</code> and restart{" "}
+        <code className="rounded bg-background/80 px-1 py-0.5">npm run dev</code> (or use a
+        production/preview build).
+      </p>
+    </div>
+  );
+}
+
 export default function NftBridgeModal({
   open,
   onOpenChange,
@@ -276,6 +298,8 @@ export default function NftBridgeModal({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Signing…
               </>
+            ) : bridgeDryRun ? (
+              `Dry-run build (${custodyLabel})`
             ) : (
               `Sign & send to ${custodyLabel}`
             )}
@@ -301,13 +325,21 @@ export default function NftBridgeModal({
         <DialogHeader className="shrink-0 space-y-1 px-5 pb-2 pt-5 text-left sm:px-6 sm:pt-6">
           <DialogTitle className="text-center sm:text-left">Bridge Dork NFTs</DialogTitle>
           <DialogDescription className="text-center sm:text-left">
-            {step === "success"
-              ? direction === "voi-to-algorand"
-                ? `Submitted to ${custodyLabel}. Opt in on Algorand when we send your ASA numbers.`
-                : `Submitted to ${custodyLabel}. We will release your NFTs on Voi when we process the bridge.`
-              : `Send from ${sourceNetwork} and receive on ${destNetwork}.`}
+            {bridgeDryRun
+              ? step === "success"
+                ? "Dry-run only — no transactions were signed or sent."
+                : "Dry-run: preview the flow; on-chain send is disabled."
+              : step === "success"
+                ? direction === "voi-to-algorand"
+                  ? `Submitted to ${custodyLabel}. Opt in on Algorand when we send your ASA numbers.`
+                  : `Submitted to ${custodyLabel}. We will release your NFTs on Voi when we process the bridge.`
+                : `Send from ${sourceNetwork} and receive on ${destNetwork}.`}
           </DialogDescription>
         </DialogHeader>
+
+        {bridgeDryRun && (
+          <BridgeDryRunBanner className="mx-5 mb-1 shrink-0 sm:mx-6" />
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3 sm:px-6">
           {step === "select" && (
@@ -436,11 +468,6 @@ export default function NftBridgeModal({
                   {submitError}
                 </p>
               )}
-              {bridgeDryRun && (
-                <p className="text-justify text-xs text-amber-600 dark:text-amber-400">
-                  Dry run — Sign &amp; send will not open your wallet or broadcast transactions.
-                </p>
-              )}
               <p className="text-muted-foreground">
                 Sign{" "}
                 <span className="font-medium text-foreground">{selectedNfts.length}</span>{" "}
@@ -489,8 +516,17 @@ export default function NftBridgeModal({
           {step === "success" && (
             <div className="space-y-4 text-sm leading-relaxed">
               <p className="text-muted-foreground">
-                Your NFTs are on their way to {custodyLabel}. The team checks bridge logs periodically — it
-                can take a while, especially if the receiver wallet differs from the sender.
+                {bridgeDryRun ? (
+                  <>
+                    This was a dry run. Your NFTs were <span className="font-medium text-foreground">not</span>{" "}
+                    sent to {custodyLabel}. Turn off dry-run (see banner above) before mainnet testing.
+                  </>
+                ) : (
+                  <>
+                    Your NFTs are on their way to {custodyLabel}. The team checks bridge logs periodically — it
+                    can take a while, especially if the receiver wallet differs from the sender.
+                  </>
+                )}
               </p>
               {destAssets.length > 0 && (
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
