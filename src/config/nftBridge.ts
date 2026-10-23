@@ -26,6 +26,13 @@ export function bridgeCustodyLabel(direction: NftBridgeDirection): "DEVOUR" | "D
   return direction === "algorand-to-voi" ? "DORKHJ" : "DEVOUR";
 }
 
+/** User-facing label for what they receive on the destination chain. */
+export function bridgeDestinationKind(
+  direction: NftBridgeDirection
+): "ASA" | "VSA" {
+  return direction === "voi-to-algorand" ? "ASA" : "VSA";
+}
+
 /** Indexer accounts to scan for `dorkfi-bridge:v1:` registration notes. */
 /** When true, bridge UI builds txs but skips wallet sign and on-chain submit (local testing). */
 export function isNftBridgeDryRun(): boolean {

@@ -59,6 +59,7 @@ describe("enrichNftsForBridge", () => {
     );
     expect(enriched).toHaveLength(1);
     expect(enriched[0]?.destAssetId).toBe("3600686574");
+    expect(enriched[0]?.destAssetLabel).toBe("ASA");
     expect(enriched[0]?.sourceId).toBe("arc72:313597:1");
   });
 });

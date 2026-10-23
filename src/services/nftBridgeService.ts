@@ -3,6 +3,7 @@ import type { NetworkId } from "@/config";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
 import {
   bridgeCustodyAddress,
+  bridgeDestinationKind,
   bridgeRegistrationLogAddresses,
   DORK_NFT_BRIDGE_ADDRESS,
   NFT_BRIDGE_NOTE_PREFIX,
@@ -17,8 +18,10 @@ import algorandService from "@/services/algorandService";
 
 export type BridgeableNft = UserNFT & {
   sourceId: string;
+  /** On-chain id in bridge registration notes (ASA id or Voi contract:token). */
   destAssetId: string;
-  destAssetLabel: string;
+  /** User-facing receive type: ASA or VSA. */
+  destAssetLabel: "ASA" | "VSA";
 };
 
 export function bridgeDirectionForNetwork(
@@ -43,19 +46,20 @@ export function enrichNftsForBridge(
   for (const nft of nfts) {
     const entry = getDorkNftByVoi(nft.contractId, Number(nft.tokenId));
     if (!entry) continue;
+    const receiveKind = bridgeDestinationKind(direction);
     if (direction === "voi-to-algorand") {
       out.push({
         ...nft,
         sourceId: `arc72:${nft.contractId}:${nft.tokenId}`,
         destAssetId: String(entry.assetId),
-        destAssetLabel: `ASA ${entry.assetId}`,
+        destAssetLabel: receiveKind,
       });
     } else {
       out.push({
         ...nft,
         sourceId: String(entry.assetId),
         destAssetId: `${entry.voiContractId}:${entry.voiTokenId}`,
-        destAssetLabel: `arc72:${entry.voiContractId}:${entry.voiTokenId}`,
+        destAssetLabel: receiveKind,
       });
     }
   }
@@ -218,7 +222,7 @@ export type NftBridgeSigningBundle = {
   unsignedFlat: Uint8Array[];
   groupSizes: number[];
   preparedGroups: Uint8Array[][];
-  destAssetsForReceiver: { name: string; assetId: string }[];
+  destAssetsForReceiver: { name: string; kind: "ASA" | "VSA"; lineKey: string }[];
 };
 
 export async function buildNftBridgeSigningBundle(args: {
@@ -262,13 +266,11 @@ export async function buildNftBridgeSigningBundle(args: {
   const groupSizes = preparedGroups.map((g) => g.length);
   const unsignedFlat = preparedGroups.flat();
 
-  const destAssetsForReceiver =
-    direction === "voi-to-algorand"
-      ? selected.map((nft) => ({ name: nft.name, assetId: nft.destAssetId }))
-      : selected.map((nft) => ({
-          name: nft.name,
-          assetId: nft.destAssetLabel,
-        }));
+  const destAssetsForReceiver = selected.map((nft) => ({
+    name: nft.name,
+    kind: nft.destAssetLabel,
+    lineKey: `${nft.contractId}-${nft.tokenId}`,
+  }));
 
   return { unsignedFlat, groupSizes, preparedGroups, destAssetsForReceiver };
 }

@@ -66,7 +66,9 @@ export default function NftBridgeModal({
   const [receiveMode, setReceiveMode] = useState<"same" | "different">("same");
   const [customReceiver, setCustomReceiver] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [destAssets, setDestAssets] = useState<{ name: string; assetId: string }[]>([]);
+  const [destAssets, setDestAssets] = useState<
+    { name: string; kind: "ASA" | "VSA"; lineKey: string }[]
+  >([]);
 
   const direction = bridgeDirectionForNetwork(currentNetwork as NetworkId);
   const destNetwork = destinationNetworkLabel(direction);
@@ -416,11 +418,7 @@ export default function NftBridgeModal({
                 <ul className="space-y-1.5">
                   {selectedNfts.map((nft) => (
                     <li key={nftKey(nft)} className="text-sm">
-                      <span className="font-medium">{nft.name}</span>
-                      <span className="text-muted-foreground">
-                        {" "}
-                        → {nft.destAssetLabel}
-                      </span>
+                      {nft.name} - {nft.destAssetLabel}
                     </li>
                   ))}
                 </ul>
@@ -444,30 +442,17 @@ export default function NftBridgeModal({
                 Your NFTs are on their way to {custodyLabel}. The team checks bridge logs periodically — it
                 can take a while, especially if the receiver wallet differs from the sender.
               </p>
-              {direction === "voi-to-algorand" && destAssets.length > 0 && (
+              {destAssets.length > 0 && (
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                   <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Opt in on Algorand
+                    {direction === "voi-to-algorand"
+                      ? "Opt in on Algorand when we send asset numbers"
+                      : "Matching on Voi"}
                   </p>
                   <ul className="space-y-1.5">
                     {destAssets.map((row) => (
-                      <li key={row.assetId} className="text-sm">
-                        {row.name}:{" "}
-                        <span className="font-mono text-xs">ASA {row.assetId}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {direction === "algorand-to-voi" && destAssets.length > 0 && (
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Matching on Voi
-                  </p>
-                  <ul className="space-y-1.5">
-                    {destAssets.map((row) => (
-                      <li key={row.assetId} className="font-mono text-xs">
-                        {row.name}: {row.assetId}
+                      <li key={row.lineKey} className="text-sm">
+                        {row.name} - {row.kind}
                       </li>
                     ))}
                   </ul>
