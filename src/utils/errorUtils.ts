@@ -27,8 +27,13 @@ export function isTransactionUserRejection(error: unknown): boolean {
     msg.includes("transaction cancelled") ||
     msg.includes("transaction canceled") ||
     msg.includes("cancelled by user") ||
-    msg.includes("canceled by user")
+    msg.includes("canceled by user") ||
+    msg.includes("cancelled before signing") ||
+    msg.includes("canceled before signing")
   ) {
+    return true;
+  }
+  if (error instanceof Error && error.name === "ClaimAllCancelledError") {
     return true;
   }
   const code = (error as { code?: number | string })?.code;

@@ -5,8 +5,64 @@
  * A failure in one group does not prevent submitting later groups (partial failure handling).
  */
 
-import algosdk, { type Algodv2 } from "algosdk";
+import algosdk, { type Algodv2, type Indexer } from "algosdk";
+import { assertAtomicGroupTransactions } from "@/lib/algorand/grouping";
 import { TX_CONFIRMATION_WAIT_ROUNDS } from "@/utils/transactionUtils";
+
+const INDEXER_CONFIRM_POLL_MS = 2000;
+
+function assertSignedAtomicGroup(group: Uint8Array[]): void {
+  if (group.length <= 1) return;
+  const txns = group.map((bytes) => algosdk.decodeSignedTransaction(bytes).txn);
+  assertAtomicGroupTransactions(txns);
+}
+
+/** Voi public algod often blocks pending-txn reads; indexer confirms after a successful broadcast. */
+async function waitForConfirmationViaIndexer(
+  indexer: Indexer,
+  txid: string,
+  waitRounds: number
+): Promise<number> {
+  const deadline = Date.now() + waitRounds * 3500;
+  while (Date.now() < deadline) {
+    try {
+      const res = (await indexer.lookupTransactionByID(txid).do()) as {
+        transaction?: { "confirmed-round"?: number };
+      };
+      const round = res.transaction?.["confirmed-round"];
+      if (round != null && round > 0) return round;
+    } catch {
+      // not indexed yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, INDEXER_CONFIRM_POLL_MS));
+  }
+  throw new Error(`Transaction not confirmed after ${waitRounds} rounds`);
+}
+
+async function confirmSubmittedGroup(
+  algod: Algodv2,
+  txid: string,
+  waitRounds: number,
+  indexer?: Indexer
+): Promise<number> {
+  try {
+    const pending = await algosdk.waitForConfirmation(algod, txid, waitRounds);
+    return pending.confirmedRound ?? 0;
+  } catch (algodErr) {
+    if (!indexer) throw algodErr;
+    try {
+      return await waitForConfirmationViaIndexer(indexer, txid, waitRounds);
+    } catch (indexerErr) {
+      const algodMsg =
+        algodErr instanceof Error ? algodErr.message : String(algodErr);
+      const indexerMsg =
+        indexerErr instanceof Error ? indexerErr.message : String(indexerErr);
+      throw new Error(
+        `${algodMsg}${indexerMsg !== algodMsg ? ` (indexer: ${indexerMsg})` : ""}`
+      );
+    }
+  }
+}
 
 export type GroupSubmitResult = {
   groupIndex: number;
@@ -17,6 +73,8 @@ export type GroupSubmitResult = {
 
 export type SubmitSignedGroupsOptions = {
   algod: Algodv2;
+  /** When algod pending/wait endpoints are restricted, confirm via indexer after broadcast. */
+  indexer?: Indexer;
   signedGroups: Uint8Array[][];
   waitRounds?: number;
   /** Only submit these global group indices (retry mode). */
@@ -34,7 +92,14 @@ export async function submitSignedGroups(
   failedGroups: number[];
   confirmedRounds: number[];
 }> {
-  const { algod, signedGroups, waitRounds = TX_CONFIRMATION_WAIT_ROUNDS, onlyGroupIndices, onGroupSubmitted } = options;
+  const {
+    algod,
+    indexer,
+    signedGroups,
+    waitRounds = TX_CONFIRMATION_WAIT_ROUNDS,
+    onlyGroupIndices,
+    onGroupSubmitted,
+  } = options;
   const indices =
     onlyGroupIndices ?? signedGroups.map((_, i) => i);
 
@@ -54,9 +119,14 @@ export async function submitSignedGroups(
     }
 
     try {
+      assertSignedAtomicGroup(group);
       const res = await algod.sendRawTransaction(group).do();
-      const pending = await algosdk.waitForConfirmation(algod, res.txid, waitRounds);
-      const round = pending.confirmedRound ?? 0;
+      const round = await confirmSubmittedGroup(
+        algod,
+        res.txid,
+        waitRounds,
+        indexer
+      );
       successfulTxIds.push(res.txid);
       if (round > 0) confirmedRounds.push(round);
       onGroupSubmitted?.({ groupIndex, txId: res.txid, confirmedRound: round });

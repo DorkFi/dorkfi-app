@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import algosdk from "algosdk";
 import {
+  assertAtomicGroupTransactions,
   chunk,
   createSigningBatches,
   createSigningBatchesFromEncoded,
+  expectedAtomicGroupId,
   groupTransactions,
 } from "@/lib/algorand/grouping";
 import { reconstructSignedGroups } from "@/lib/algorand/signing";
@@ -62,6 +64,39 @@ describe("createSigningBatchesFromEncoded", () => {
     expect(batches).toHaveLength(1);
     expect(batches[0]!.flat).toHaveLength(3);
     expect(batches[0]!.flat[0]).toEqual(new Uint8Array([1, 2]));
+  });
+});
+
+describe("assertAtomicGroupTransactions", () => {
+  it("rejects when ulujs left a stale group on one txn", () => {
+    const addr = algosdk.encodeAddress(new Uint8Array(32).fill(7));
+    const suggestedParams = {
+      fee: 1000,
+      firstValid: 1,
+      lastValid: 1000,
+      genesisHash: new Uint8Array(32).fill(1),
+      genesisID: "test",
+      minFee: 1000,
+    };
+    const a = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: addr,
+      receiver: addr,
+      amount: 1,
+      suggestedParams,
+    });
+    const b = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: addr,
+      receiver: addr,
+      amount: 2,
+      suggestedParams,
+    });
+    algosdk.assignGroupID([a]);
+    b.group = undefined;
+    expect(() => assertAtomicGroupTransactions([a, b])).toThrow(/Invalid atomic/);
+    for (const t of [a, b]) t.group = undefined;
+    algosdk.assignGroupID([a, b]);
+    expect(() => assertAtomicGroupTransactions([a, b])).not.toThrow();
+    expect(Buffer.compare(a.group!, expectedAtomicGroupId([a, b]))).toBe(0);
   });
 });
 

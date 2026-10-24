@@ -5389,7 +5389,15 @@ export const getCurrentAlgorandConfig = (usePublicUrl: boolean = true) => {
  */
 export const getAlgorandConfigForTransactions = (networkId: NetworkId) => {
   const networkConfig = getNetworkConfig(networkId);
-  return getAlgorandConfigFromNetworkConfig(networkConfig, false);
+  // Nodely algod exposes pending-txn + wait helpers reliably from browser submits.
+  const txNetworkConfig =
+    networkId === "voi-mainnet"
+      ? {
+          ...networkConfig,
+          rpcUrl: "https://mainnet-api.voi.nodely.dev",
+        }
+      : networkConfig;
+  return getAlgorandConfigFromNetworkConfig(txNetworkConfig, false);
 };
 
 /**
