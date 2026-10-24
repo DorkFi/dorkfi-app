@@ -16,6 +16,11 @@ import {
 } from "@/data/dorkNftAlgorandRegistry";
 import type { UserNFT } from "@/hooks/useUserNFTs";
 import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimService";
+import {
+  assertAtomicGroupTransactions,
+  encodeTransactionGroups,
+  ensureAtomicGroups,
+} from "@/lib/algorand/grouping";
 import algorandService from "@/services/algorandService";
 
 /** Strip whitespace from pasted addresses (spaces do not belong in on-chain notes). */
@@ -327,13 +332,14 @@ async function buildVoiBridgeGroupForNft(
     sender,
     items: bridgeIntentItemsFromSelection([nft]),
   });
+  const minFee = params.minFee ?? 1000n;
   /** 0 VOI payment — carries bridge intent note; fees are paid in VOI on Voi mainnet. */
   const registration = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
     sender,
     receiver: DORK_NFT_BRIDGE_ADDRESS,
     amount: 0n,
     note,
-    suggestedParams: { ...params, fee: 0n },
+    suggestedParams: { ...params, flatFee: true, fee: minFee },
   });
   const group: algosdk.Transaction[] = [...transferTxns, registration];
   const legacyDestNote = encodeLegacyBridgeDestinationNote(receiver);
@@ -345,32 +351,37 @@ async function buildVoiBridgeGroupForNft(
         receiver: DORK_NFT_BRIDGE_ADDRESS,
         amount: 0n,
         note: legacyDestNote,
-        suggestedParams: { ...params, fee: 0n },
+        suggestedParams: { ...params, flatFee: true, fee: minFee },
       })
     );
   }
   if (group.length > ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP) {
     throw new Error("Bridge transaction group is too large for this NFT.");
   }
-  finalizeVoiBridgeGroupFees(group, params.minFee ?? 1000n);
-  algosdk.assignGroupID(group);
+  assignVoiBridgeAtomicGroup(group, minFee);
   return group;
 }
 
-/** Zero-fee follower txns; head (ARC-72) pays the pooled group fee. Must run before assignGroupID. */
-function finalizeVoiBridgeGroupFees(
+/**
+ * ulujs ARC-72 bytes may carry a stale `group` from simulation — clear before re-grouping.
+ * Keep a positive fee on every txn (Voi Wallet rejects some zero-fee follower groups).
+ */
+function assignVoiBridgeAtomicGroup(
   group: algosdk.Transaction[],
   minFee: bigint
 ): void {
-  if (group.length <= 1) return;
-  for (let i = 1; i < group.length; i++) {
-    group[i]!.fee = 0n;
+  for (const txn of group) {
+    txn.group = undefined;
+    if (BigInt(txn.fee) < minFee) {
+      txn.fee = minFee;
+    }
   }
   const minTotal = minFee * BigInt(group.length);
-  const head = group[0]!;
-  if (BigInt(head.fee) < minTotal) {
-    head.fee = minTotal;
+  if (BigInt(group[0]!.fee) < minTotal) {
+    group[0]!.fee = minTotal;
   }
+  algosdk.assignGroupID(group);
+  assertAtomicGroupTransactions(group);
 }
 
 async function buildAlgorandBridgeGroupForNft(
@@ -480,9 +491,8 @@ export async function buildNftBridgeSigningBundle(args: {
     }
   }
 
-  const preparedGroups = atomicGroups.map((group) =>
-    group.map((txn) => algosdk.encodeUnsignedTransaction(txn))
-  );
+  const normalizedGroups = ensureAtomicGroups(atomicGroups);
+  const preparedGroups = encodeTransactionGroups(normalizedGroups);
   const groupSizes = preparedGroups.map((g) => g.length);
   const unsignedFlat = preparedGroups.flat();
 
