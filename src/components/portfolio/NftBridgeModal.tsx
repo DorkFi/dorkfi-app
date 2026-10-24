@@ -35,6 +35,10 @@ import {
   validateBridgeDestinationWallet,
   type BridgeableNft,
 } from "@/services/nftBridgeService";
+import {
+  resolveBridgeDestinationInput,
+  type BridgeDestinationResolved,
+} from "@/services/bridgeDestinationResolveService";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
 import { signAllEncodedBatches } from "@/lib/algorand/signing";
@@ -99,6 +103,9 @@ export default function NftBridgeModal({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isValidatingDestination, setIsValidatingDestination] = useState(false);
   const [destinationError, setDestinationError] = useState<string | null>(null);
+  const [resolvedDestination, setResolvedDestination] =
+    useState<BridgeDestinationResolved | null>(null);
+  const [isResolvingDestination, setIsResolvingDestination] = useState(false);
   const [destAssets, setDestAssets] = useState<
     { receiveLine: string; lineKey: string }[]
   >([]);
@@ -131,7 +138,8 @@ export default function NftBridgeModal({
   const receiverAddress =
     receiveMode === "same"
       ? normalizeBridgeAddressInput(ownerAddress)
-      : normalizeBridgeAddressInput(customReceiver);
+      : (resolvedDestination?.address ??
+        normalizeBridgeAddressInput(customReceiver));
 
   useEffect(() => {
     if (!open) {
@@ -145,11 +153,15 @@ export default function NftBridgeModal({
       setSubmitError(null);
       setDestinationError(null);
       setIsValidatingDestination(false);
+      setResolvedDestination(null);
+      setIsResolvingDestination(false);
     }
   }, [open]);
 
   const handleReceiveModeChange = (mode: "same" | "different") => {
     setReceiveMode(mode);
+    setResolvedDestination(null);
+    setDestinationError(null);
     if (mode === "different") {
       setCustomReceiver("");
     }
@@ -177,13 +189,53 @@ export default function NftBridgeModal({
     setStep("destination");
   };
 
+  const resolveDestinationFromInput = async (
+    raw: string
+  ): Promise<BridgeDestinationResolved | null> => {
+    setIsResolvingDestination(true);
+    try {
+      const resolved = await resolveBridgeDestinationInput(raw, direction);
+      if (!resolved.ok) {
+        setDestinationError(resolved.message);
+        setResolvedDestination(null);
+        return null;
+      }
+      const picked: BridgeDestinationResolved = {
+        address: resolved.address,
+        matched: resolved.matched,
+        displayName: resolved.displayName,
+        avatarUrl: resolved.avatarUrl,
+        nftLabel: resolved.nftLabel,
+      };
+      setResolvedDestination(picked);
+      setDestinationError(null);
+      return picked;
+    } finally {
+      setIsResolvingDestination(false);
+    }
+  };
+
   const handleContinueFromDestination = async () => {
     setDestinationError(null);
     setIsValidatingDestination(true);
     try {
+      let addressToValidate = receiverAddress;
+      if (receiveMode === "different") {
+        const picked = await resolveDestinationFromInput(customReceiver);
+        if (!picked) {
+          toast({
+            title: "Could not resolve destination",
+            description: destinationError ?? "Check the name or address.",
+            variant: "destructive",
+          });
+          return;
+        }
+        addressToValidate = picked.address;
+      }
+
       const validation = await validateBridgeDestinationWallet({
         direction,
-        receiver: receiverAddress,
+        receiver: addressToValidate,
       });
       if (!validation.ok) {
         setDestinationError(validation.message);
@@ -221,9 +273,19 @@ export default function NftBridgeModal({
     setIsSubmitting(true);
     setSubmitError(null);
     try {
+      let addressToValidate = receiverAddress;
+      if (receiveMode === "different" && !algosdk.isValidAddress(addressToValidate)) {
+        const picked = await resolveDestinationFromInput(customReceiver);
+        if (!picked) {
+          setSubmitError(destinationError ?? "Could not resolve destination.");
+          return;
+        }
+        addressToValidate = picked.address;
+      }
+
       const validation = await validateBridgeDestinationWallet({
         direction,
-        receiver: receiverAddress,
+        receiver: addressToValidate,
       });
       if (!validation.ok) {
         setSubmitError(validation.message);
@@ -238,7 +300,7 @@ export default function NftBridgeModal({
       const bundle = await buildNftBridgeSigningBundle({
         networkId: currentNetwork as NetworkId,
         sender: ownerAddress,
-        receiver: receiverAddress,
+        receiver: addressToValidate,
         selected: selectedNfts,
       });
 
@@ -322,10 +384,10 @@ export default function NftBridgeModal({
           <Button
             type="button"
             className="min-h-11 flex-1 sm:flex-none"
-            disabled={isValidatingDestination}
+            disabled={isValidatingDestination || isResolvingDestination}
             onClick={() => void handleContinueFromDestination()}
           >
-            {isValidatingDestination ? (
+            {isValidatingDestination || isResolvingDestination ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Checking wallet…
@@ -502,7 +564,9 @@ export default function NftBridgeModal({
                 </div>
               </RadioGroup>
               <div className="space-y-2">
-                <Label htmlFor="bridge-receiver">Destination address</Label>
+                <Label htmlFor="bridge-receiver">
+                  Destination {receiveMode === "different" ? "address or name" : "address"}
+                </Label>
                 <Input
                   id="bridge-receiver"
                   value={receiveMode === "same" ? ownerAddress : customReceiver}
@@ -510,15 +574,20 @@ export default function NftBridgeModal({
                   disabled={receiveMode === "same"}
                   onChange={(e) => {
                     setDestinationError(null);
+                    setResolvedDestination(null);
                     setCustomReceiver(e.target.value);
                   }}
                   onBlur={() => {
-                    if (receiveMode === "different") {
-                      setCustomReceiver(normalizeBridgeAddressInput(customReceiver));
+                    if (receiveMode === "different" && customReceiver.trim()) {
+                      void resolveDestinationFromInput(customReceiver.trim());
                     }
                   }}
                   placeholder={
-                    receiveMode === "different" ? `Paste ${destNetwork} address` : undefined
+                    receiveMode === "different"
+                      ? direction === "algorand-to-voi"
+                        ? "Voi address or name.voi (e.g. haroof.voi)"
+                        : "Algorand address or name.algo (e.g. haroof.algo)"
+                      : undefined
                   }
                   autoComplete="off"
                   className={cn(
@@ -526,6 +595,40 @@ export default function NftBridgeModal({
                     receiveMode === "same" && "text-muted-foreground"
                   )}
                 />
+                {receiveMode === "different" && resolvedDestination && (
+                  <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+                    {resolvedDestination.avatarUrl ? (
+                      <img
+                        src={resolvedDestination.avatarUrl}
+                        alt=""
+                        className="mt-0.5 h-10 w-10 shrink-0 rounded-md object-cover"
+                      />
+                    ) : null}
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="font-medium text-foreground">
+                        {resolvedDestination.displayName}
+                        {resolvedDestination.matched !== "address" && (
+                          <span className="font-normal text-muted-foreground">
+                            {" "}
+                            →{" "}
+                            <span className="font-mono">
+                              {resolvedDestination.address.slice(0, 6)}…
+                              {resolvedDestination.address.slice(-6)}
+                            </span>
+                          </span>
+                        )}
+                      </p>
+                      {resolvedDestination.nftLabel && (
+                        <p className="text-muted-foreground">
+                          enVoi profile NFT: {resolvedDestination.nftLabel}
+                        </p>
+                      )}
+                      {resolvedDestination.matched === "nfd" && (
+                        <p className="text-muted-foreground">Resolved via NFD</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -574,6 +677,20 @@ export default function NftBridgeModal({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="bridge-confirm-receiver">Destination address</Label>
+                {resolvedDestination && receiveMode === "different" && (
+                  <p className="text-sm text-muted-foreground">
+                    {resolvedDestination.displayName}
+                    {resolvedDestination.matched !== "address" ? (
+                      <>
+                        {" "}
+                        →{" "}
+                        <span className="font-mono text-foreground">
+                          {receiverAddress}
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
+                )}
                 <Input
                   id="bridge-confirm-receiver"
                   value={receiverAddress}
