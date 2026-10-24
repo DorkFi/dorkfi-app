@@ -313,12 +313,15 @@ export default function NftBridgeModal({
 
         const algoNet = getAlgorandNetworkFromNetworkId(currentNetwork as NetworkId);
         if (!algoNet) throw new Error("Unsupported network.");
-        const { algod } = await algorandService.initializeClientsForReads(algoNet);
+        const { algod, indexer } =
+          await algorandService.initializeClientsForTransactions(algoNet);
 
         let firstGroupError: string | undefined;
         const submitResult = await submitSignedGroups({
           algod,
+          indexer,
           signedGroups,
+          waitRounds: 32,
           onGroupSubmitted: (result) => {
             if (result.error && firstGroupError === undefined) {
               firstGroupError = result.error;
@@ -349,8 +352,9 @@ export default function NftBridgeModal({
       });
     } catch (err) {
       const feedback = getTransactionErrorFeedback(err);
+      const rawMessage = err instanceof Error ? err.message : String(err);
       const description = formatBridgeFeeCurrencyError(
-        feedback.message,
+        feedback.userRejected ? feedback.message : rawMessage || feedback.message,
         registrationCurrency
       );
       setSubmitError(description);

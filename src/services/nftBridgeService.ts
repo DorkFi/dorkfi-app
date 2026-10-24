@@ -17,7 +17,6 @@ import {
 import type { UserNFT } from "@/hooks/useUserNFTs";
 import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimService";
 import algorandService from "@/services/algorandService";
-import { getUserFriendlyError } from "@/utils/errorUtils";
 
 /** Strip whitespace from pasted addresses (spaces do not belong in on-chain notes). */
 export function normalizeBridgeAddressInput(raw: string): string {
@@ -116,15 +115,7 @@ export function bridgeSubmitOutcomeError(args: {
 
   if (successfulTxIds.length === 0) {
     const raw = firstGroupError ?? "Transaction could not be confirmed.";
-    const friendly = getUserFriendlyError(new Error(raw));
-    const genericNetwork =
-      friendly ===
-      "Network connection issue. Please check your internet connection and try again.";
-    const message =
-      genericNetwork && raw.length > 0 && raw !== "Transaction could not be confirmed."
-        ? raw
-        : friendly;
-    return formatBridgeFeeCurrencyError(message, feeCurrency);
+    return formatBridgeFeeCurrencyError(raw, feeCurrency);
   }
 
   return `Only ${successfulTxIds.length} of ${totalGroups} transfers reached ${custodyLabel} before one failed. Check your wallet — some NFTs may already be in custody. Try again for any that did not send, or reach out on Discord if you are unsure.`;
@@ -362,7 +353,25 @@ async function buildVoiBridgeGroupForNft(
     throw new Error("Bridge transaction group is too large for this NFT.");
   }
   algosdk.assignGroupID(group);
+  poolBridgeGroupFees(group, params.minFee ?? 1000n);
   return group;
+}
+
+/** Pool registration payment fees onto the ARC-72 app call so inner steps stay funded. */
+function poolBridgeGroupFees(
+  group: algosdk.Transaction[],
+  minFee: bigint
+): void {
+  if (group.length <= 1) return;
+  let extra = 0n;
+  for (let i = 1; i < group.length; i++) {
+    extra += BigInt(group[i]!.fee);
+    group[i]!.fee = 0n;
+  }
+  const head = group[0]!;
+  const minTotal = minFee * BigInt(group.length);
+  const pooled = BigInt(head.fee) + extra;
+  head.fee = pooled < minTotal ? minTotal : pooled;
 }
 
 async function buildAlgorandBridgeGroupForNft(
