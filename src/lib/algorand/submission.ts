@@ -10,6 +10,21 @@ import { TX_CONFIRMATION_WAIT_ROUNDS } from "@/utils/transactionUtils";
 
 const INDEXER_CONFIRM_POLL_MS = 2000;
 
+function assertSignedAtomicGroup(group: Uint8Array[]): void {
+  if (group.length <= 1) return;
+  const groupIds = group.map((bytes) => {
+    const tx = algosdk.decodeSignedTransaction(bytes).txn;
+    if (!tx.group || tx.group.length === 0) return "";
+    return Buffer.from(tx.group).toString("base64");
+  });
+  const head = groupIds[0];
+  if (groupIds.some((id) => id !== head)) {
+    throw new Error(
+      "Wallet returned mismatched group IDs for one atomic transfer. Refresh and try again, or bridge one NFT at a time."
+    );
+  }
+}
+
 /** Voi public algod often blocks pending-txn reads; indexer confirms after a successful broadcast. */
 async function waitForConfirmationViaIndexer(
   indexer: Indexer,
@@ -112,6 +127,7 @@ export async function submitSignedGroups(
     }
 
     try {
+      assertSignedAtomicGroup(group);
       const res = await algod.sendRawTransaction(group).do();
       const round = await confirmSubmittedGroup(
         algod,

@@ -333,7 +333,7 @@ async function buildVoiBridgeGroupForNft(
     receiver: DORK_NFT_BRIDGE_ADDRESS,
     amount: 0n,
     note,
-    suggestedParams: { ...params, flatFee: true, fee: 1000n },
+    suggestedParams: { ...params, fee: 0n },
   });
   const group: algosdk.Transaction[] = [...transferTxns, registration];
   const legacyDestNote = encodeLegacyBridgeDestinationNote(receiver);
@@ -345,33 +345,32 @@ async function buildVoiBridgeGroupForNft(
         receiver: DORK_NFT_BRIDGE_ADDRESS,
         amount: 0n,
         note: legacyDestNote,
-        suggestedParams: { ...params, flatFee: true, fee: 1000n },
+        suggestedParams: { ...params, fee: 0n },
       })
     );
   }
   if (group.length > ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP) {
     throw new Error("Bridge transaction group is too large for this NFT.");
   }
+  finalizeVoiBridgeGroupFees(group, params.minFee ?? 1000n);
   algosdk.assignGroupID(group);
-  poolBridgeGroupFees(group, params.minFee ?? 1000n);
   return group;
 }
 
-/** Pool registration payment fees onto the ARC-72 app call so inner steps stay funded. */
-function poolBridgeGroupFees(
+/** Zero-fee follower txns; head (ARC-72) pays the pooled group fee. Must run before assignGroupID. */
+function finalizeVoiBridgeGroupFees(
   group: algosdk.Transaction[],
   minFee: bigint
 ): void {
   if (group.length <= 1) return;
-  let extra = 0n;
   for (let i = 1; i < group.length; i++) {
-    extra += BigInt(group[i]!.fee);
     group[i]!.fee = 0n;
   }
-  const head = group[0]!;
   const minTotal = minFee * BigInt(group.length);
-  const pooled = BigInt(head.fee) + extra;
-  head.fee = pooled < minTotal ? minTotal : pooled;
+  const head = group[0]!;
+  if (BigInt(head.fee) < minTotal) {
+    head.fee = minTotal;
+  }
 }
 
 async function buildAlgorandBridgeGroupForNft(
