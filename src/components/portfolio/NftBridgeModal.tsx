@@ -31,6 +31,8 @@ import {
   buildNftBridgeSigningBundle,
   bridgeSubmitOutcomeError,
   formatBridgeFeeCurrencyError,
+  normalizeBridgeAddressInput,
+  validateBridgeDestinationWallet,
   type BridgeableNft,
 } from "@/services/nftBridgeService";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
@@ -95,6 +97,8 @@ export default function NftBridgeModal({
   const [customReceiver, setCustomReceiver] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isValidatingDestination, setIsValidatingDestination] = useState(false);
+  const [destinationError, setDestinationError] = useState<string | null>(null);
   const [destAssets, setDestAssets] = useState<
     { receiveLine: string; lineKey: string }[]
   >([]);
@@ -125,7 +129,9 @@ export default function NftBridgeModal({
   );
 
   const receiverAddress =
-    receiveMode === "same" ? ownerAddress.trim() : customReceiver.trim();
+    receiveMode === "same"
+      ? normalizeBridgeAddressInput(ownerAddress)
+      : normalizeBridgeAddressInput(customReceiver);
 
   useEffect(() => {
     if (!open) {
@@ -137,6 +143,8 @@ export default function NftBridgeModal({
       setDestAssets([]);
       setIsSubmitting(false);
       setSubmitError(null);
+      setDestinationError(null);
+      setIsValidatingDestination(false);
     }
   }, [open]);
 
@@ -169,16 +177,36 @@ export default function NftBridgeModal({
     setStep("destination");
   };
 
-  const handleContinueFromDestination = () => {
-    if (!algosdk.isValidAddress(receiverAddress)) {
+  const handleContinueFromDestination = async () => {
+    setDestinationError(null);
+    setIsValidatingDestination(true);
+    try {
+      const validation = await validateBridgeDestinationWallet({
+        direction,
+        receiver: receiverAddress,
+      });
+      if (!validation.ok) {
+        setDestinationError(validation.message);
+        toast({
+          title: "Check destination wallet",
+          description: validation.message,
+          variant: "destructive",
+        });
+        return;
+      }
+      setStep("confirm");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not verify destination wallet.";
+      setDestinationError(message);
       toast({
-        title: "Invalid address",
-        description: `Enter a valid ${destNetwork} wallet address.`,
+        title: "Could not verify wallet",
+        description: message,
         variant: "destructive",
       });
-      return;
+    } finally {
+      setIsValidatingDestination(false);
     }
-    setStep("confirm");
   };
 
   const handleSignAndSend = async () => {
@@ -193,6 +221,20 @@ export default function NftBridgeModal({
     setIsSubmitting(true);
     setSubmitError(null);
     try {
+      const validation = await validateBridgeDestinationWallet({
+        direction,
+        receiver: receiverAddress,
+      });
+      if (!validation.ok) {
+        setSubmitError(validation.message);
+        toast({
+          title: "Check destination wallet",
+          description: validation.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
       const bundle = await buildNftBridgeSigningBundle({
         networkId: currentNetwork as NetworkId,
         sender: ownerAddress,
@@ -277,8 +319,20 @@ export default function NftBridgeModal({
           <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => setStep("select")}>
             Back
           </Button>
-          <Button type="button" className="min-h-11 flex-1 sm:flex-none" onClick={handleContinueFromDestination}>
-            Continue
+          <Button
+            type="button"
+            className="min-h-11 flex-1 sm:flex-none"
+            disabled={isValidatingDestination}
+            onClick={() => void handleContinueFromDestination()}
+          >
+            {isValidatingDestination ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Checking wallet…
+              </>
+            ) : (
+              "Continue"
+            )}
           </Button>
         </>
       )}
@@ -416,7 +470,17 @@ export default function NftBridgeModal({
               {direction === "algorand-to-voi" && (
                 <p className="text-justify text-sm leading-snug text-muted-foreground">
                   ASAs go to DORKHJ on Algorand. Your matching Voi NFT is released from DEVOUR
-                  when we process the bridge.
+                  when we process the bridge. The Voi address must already hold a little{" "}
+                  <span className="font-medium text-foreground">VOI</span> — we check before you
+                  sign, because NFTs sent to a wrong or empty address are hard to recover.
+                </p>
+              )}
+              {destinationError && (
+                <p
+                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  {destinationError}
                 </p>
               )}
               <RadioGroup
@@ -444,7 +508,15 @@ export default function NftBridgeModal({
                   value={receiveMode === "same" ? ownerAddress : customReceiver}
                   readOnly={receiveMode === "same"}
                   disabled={receiveMode === "same"}
-                  onChange={(e) => setCustomReceiver(e.target.value)}
+                  onChange={(e) => {
+                    setDestinationError(null);
+                    setCustomReceiver(e.target.value);
+                  }}
+                  onBlur={() => {
+                    if (receiveMode === "different") {
+                      setCustomReceiver(normalizeBridgeAddressInput(customReceiver));
+                    }
+                  }}
                   placeholder={
                     receiveMode === "different" ? `Paste ${destNetwork} address` : undefined
                   }

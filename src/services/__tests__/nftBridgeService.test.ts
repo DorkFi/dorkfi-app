@@ -10,6 +10,7 @@ import {
   enrichNftsForBridge,
   bridgeSubmitOutcomeError,
   encodeLegacyBridgeDestinationNote,
+  normalizeBridgeAddressInput,
   formatBridgeFeeCurrencyError,
   formatBridgeReceiveLine,
   parseBridgeIntentNote,
@@ -45,6 +46,16 @@ describe("bridge custody addresses", () => {
   it("uses DORKHJ for Algorand to Voi", () => {
     expect(bridgeCustodyLabel("algorand-to-voi")).toBe("DORKHJ");
     expect(bridgeCustodyAddress("algorand-to-voi")).toBe(DORK_NFT_ALGORAND_RESERVE_ADDRESS);
+  });
+});
+
+describe("normalizeBridgeAddressInput", () => {
+  it("removes all whitespace from pasted addresses", () => {
+    expect(
+      normalizeBridgeAddressInput(
+        "EM6YOBT4UOMEGWZO74OLOSA55V6EH6DUQSCAJA6FNMQ5IS5U3GZXBUR2OI "
+      )
+    ).toBe("EM6YOBT4UOMEGWZO74OLOSA55V6EH6DUQSCAJA6FNMQ5IS5U3GZXBUR2OI");
   });
 });
 

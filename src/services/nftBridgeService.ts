@@ -19,6 +19,63 @@ import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimServi
 import algorandService from "@/services/algorandService";
 import { getUserFriendlyError } from "@/utils/errorUtils";
 
+/** Strip whitespace from pasted addresses (spaces do not belong in on-chain notes). */
+export function normalizeBridgeAddressInput(raw: string): string {
+  return raw.replace(/\s+/g, "");
+}
+
+export type BridgeDestinationValidationResult =
+  | { ok: true; balanceMicro: bigint }
+  | { ok: false; message: string };
+
+/**
+ * Require a funded account on the **destination** chain before bridging.
+ * Voi accepts ARC-72 transfers to valid addresses even with 0 VOI — wrong paste is not recoverable.
+ */
+export async function validateBridgeDestinationWallet(args: {
+  direction: NftBridgeDirection;
+  receiver: string;
+}): Promise<BridgeDestinationValidationResult> {
+  const trimmed = normalizeBridgeAddressInput(args.receiver);
+  if (!algosdk.isValidAddress(trimmed)) {
+    const chain = args.direction === "algorand-to-voi" ? "Voi" : "Algorand";
+    return {
+      ok: false,
+      message: `Enter a valid ${chain} wallet address (58 characters, no spaces).`,
+    };
+  }
+
+  const destNetworkId: NetworkId =
+    args.direction === "algorand-to-voi" ? "voi-mainnet" : "algorand-mainnet";
+  const destLabel = destNetworkId === "voi-mainnet" ? "Voi" : "Algorand";
+  const nativeLabel = destNetworkId === "voi-mainnet" ? "VOI" : "ALGO";
+
+  const algoNet = getAlgorandNetworkFromNetworkId(destNetworkId);
+  if (!algoNet) {
+    return { ok: false, message: "Bridge destination network is not configured." };
+  }
+
+  const { indexer } = await algorandService.initializeClientsForReads(algoNet);
+  try {
+    const res = (await indexer.lookupAccountByID(trimmed).do()) as {
+      account?: { amount?: number | bigint };
+    };
+    const amount = BigInt(res.account?.amount ?? 0);
+    if (amount <= 0n) {
+      return {
+        ok: false,
+        message: `This address has no ${nativeLabel} on ${destLabel}. Send a small amount there first to confirm it is your wallet — NFTs sent to a wrong or empty address usually cannot be recovered.`,
+      };
+    }
+    return { ok: true, balanceMicro: amount };
+  } catch {
+    return {
+      ok: false,
+      message: `This address is not funded on ${destLabel}. Send a little ${nativeLabel} there before bridging so we know it is the correct destination.`,
+    };
+  }
+}
+
 export type BridgeableNft = UserNFT & {
   sourceId: string;
   /** On-chain id in bridge registration notes (ASA id or Voi contract:token). */
@@ -124,7 +181,7 @@ export function enrichNftsForBridge(
 export function encodeLegacyBridgeDestinationNote(
   receiver: string
 ): Uint8Array | null {
-  const trimmed = receiver.trim();
+  const trimmed = normalizeBridgeAddressInput(receiver);
   if (!algosdk.isValidAddress(trimmed)) return null;
   const bytes = new TextEncoder().encode(trimmed);
   if (bytes.length !== 58) return null;
@@ -332,7 +389,8 @@ export async function buildNftBridgeSigningBundle(args: {
   if (selected.length === 0) {
     throw new Error("Select at least one NFT to bridge.");
   }
-  if (!algosdk.isValidAddress(receiver)) {
+  const normalizedReceiver = normalizeBridgeAddressInput(receiver);
+  if (!algosdk.isValidAddress(normalizedReceiver)) {
     throw new Error("Enter a valid destination wallet address.");
   }
 
@@ -348,11 +406,24 @@ export async function buildNftBridgeSigningBundle(args: {
   for (const nft of selected) {
     if (direction === "voi-to-algorand") {
       atomicGroups.push(
-        await buildVoiBridgeGroupForNft(nft, sender, receiver, direction, algod, indexer)
+        await buildVoiBridgeGroupForNft(
+          nft,
+          sender,
+          normalizedReceiver,
+          direction,
+          algod,
+          indexer
+        )
       );
     } else {
       atomicGroups.push(
-        await buildAlgorandBridgeGroupForNft(nft, sender, receiver, direction, algod)
+        await buildAlgorandBridgeGroupForNft(
+          nft,
+          sender,
+          normalizedReceiver,
+          direction,
+          algod
+        )
       );
     }
   }
