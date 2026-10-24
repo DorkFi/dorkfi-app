@@ -9,6 +9,7 @@ import {
   encodeBridgeIntentNote,
   enrichNftsForBridge,
   bridgeSubmitOutcomeError,
+  algodClientForUlujsArc72,
   encodeLegacyBridgeDestinationNote,
   normalizeBridgeAddressInput,
   formatBridgeFeeCurrencyError,
@@ -46,6 +47,25 @@ describe("bridge custody addresses", () => {
   it("uses DORKHJ for Algorand to Voi", () => {
     expect(bridgeCustodyLabel("algorand-to-voi")).toBe("DORKHJ");
     expect(bridgeCustodyAddress("algorand-to-voi")).toBe(DORK_NFT_ALGORAND_RESERVE_ADDRESS);
+  });
+});
+
+describe("algodClientForUlujsArc72", () => {
+  it("maps minBalance to min-balance for ulujs ARC-72", async () => {
+    const base = {
+      accountInformation: (_address: string) => ({
+        do: async () => ({
+          amount: 100_000n,
+          minBalance: 25_000n,
+        }),
+      }),
+    } as unknown as import("algosdk").Algodv2;
+    const patched = algodClientForUlujsArc72(base);
+    const info = (await patched
+      .accountInformation("ADDR")
+      .do()) as Record<string, bigint>;
+    expect(info["min-balance"]).toBe(25_000n);
+    expect(info.amount - info["min-balance"]).toBe(75_000n);
   });
 });
 

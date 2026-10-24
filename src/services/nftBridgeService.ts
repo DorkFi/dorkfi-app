@@ -240,6 +240,37 @@ function bridgeIntentItemsFromSelection(
   }));
 }
 
+/**
+ * ulujs ARC-72 reads `min-balance` from algod account JSON; algosdk v3 exposes `minBalance`.
+ * Without this shim, transfer simulation throws (BigInt mix / undefined min balance).
+ */
+export function algodClientForUlujsArc72(algod: Algodv2): Algodv2 {
+  return new Proxy(algod, {
+    get(target, prop, receiver) {
+      if (prop === "accountInformation") {
+        return (address: string) => {
+          const req = target.accountInformation(address);
+          const originalDo = req.do.bind(req);
+          req.do = async () => {
+            const info = (await originalDo()) as Record<string, unknown>;
+            const amount = info.amount;
+            const minRaw = info["min-balance"] ?? info.minBalance ?? 0;
+            return {
+              ...info,
+              amount: typeof amount === "bigint" ? amount : BigInt(String(amount ?? 0)),
+              "min-balance":
+                typeof minRaw === "bigint" ? minRaw : BigInt(String(minRaw)),
+            };
+          };
+          return req;
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Algodv2;
+}
+
 async function buildArc72TransferBytes(
   contractId: number,
   tokenId: string,
@@ -248,7 +279,8 @@ async function buildArc72TransferBytes(
   indexer: Indexer
 ): Promise<algosdk.Transaction[]> {
   const Arc72 = (await import("ulujs/impl/arc72/index.js")).default;
-  const contract = new Arc72(contractId, algod, indexer, {
+  const algodForArc72 = algodClientForUlujsArc72(algod);
+  const contract = new Arc72(contractId, algodForArc72, indexer, {
     simulate: true,
     acc: { addr: sender },
   });
@@ -260,7 +292,14 @@ async function buildArc72TransferBytes(
     false
   );
   if (!result?.success || !Array.isArray(result.txns)) {
-    throw new Error(`Could not build Voi NFT transfer for token ${tokenId}.`);
+    const detail =
+      (result as { message?: string; error?: string } | undefined)?.message ??
+      (result as { error?: string } | undefined)?.error;
+    throw new Error(
+      detail
+        ? `Could not build Voi NFT transfer for token ${tokenId}: ${detail}`
+        : `Could not build Voi NFT transfer for token ${tokenId}.`
+    );
   }
   return (result.txns as string[]).map((b64) =>
     algosdk.decodeUnsignedTransaction(
