@@ -116,10 +116,15 @@ export function bridgeSubmitOutcomeError(args: {
 
   if (successfulTxIds.length === 0) {
     const raw = firstGroupError ?? "Transaction could not be confirmed.";
-    return formatBridgeFeeCurrencyError(
-      getUserFriendlyError(new Error(raw)),
-      feeCurrency
-    );
+    const friendly = getUserFriendlyError(new Error(raw));
+    const genericNetwork =
+      friendly ===
+      "Network connection issue. Please check your internet connection and try again.";
+    const message =
+      genericNetwork && raw.length > 0 && raw !== "Transaction could not be confirmed."
+        ? raw
+        : friendly;
+    return formatBridgeFeeCurrencyError(message, feeCurrency);
   }
 
   return `Only ${successfulTxIds.length} of ${totalGroups} transfers reached ${custodyLabel} before one failed. Check your wallet — some NFTs may already be in custody. Try again for any that did not send, or reach out on Discord if you are unsure.`;
