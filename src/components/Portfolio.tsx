@@ -106,6 +106,7 @@ import type { MarketFilter } from "@/hooks/useOnDemandMarketData";
 import {
   PortfolioPositionsFilteredEmptyState,
 } from "@/components/portfolio/PortfolioPositionsFilterBar";
+import PortfolioNftBridgeNotice from "@/components/portfolio/PortfolioNftBridgeNotice";
 import PortfolioPositionsCardHeader from "@/components/portfolio/PortfolioPositionsCardHeader";
 import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
@@ -5985,6 +5986,16 @@ const Portfolio = () => {
             </>
           );
         })()}
+
+      <PortfolioNftBridgeNotice
+        address={displayAddress}
+        networkId={currentNetwork}
+        canBridge={Boolean(
+          activeAccount?.address &&
+            displayAddress &&
+            activeAccount.address.toLowerCase() === displayAddress.toLowerCase()
+        )}
+      />
 
       {/* Per-Network Asset Tables */}
       {user?.computed?.networkValues &&

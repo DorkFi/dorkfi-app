@@ -56,6 +56,37 @@ export function encodeTransactionGroups(groups: algosdk.Transaction[][]): Uint8A
   );
 }
 
+/** Group id from txn bodies with `group` cleared (matches algod / assignGroupID). */
+export function expectedAtomicGroupId(
+  txns: ReadonlyArray<algosdk.Transaction>
+): Uint8Array {
+  const ungrouped = txns.map((t) => {
+    const copy = algosdk.decodeUnsignedTransaction(
+      algosdk.encodeUnsignedTransaction(t)
+    );
+    copy.group = undefined;
+    return copy;
+  });
+  return algosdk.computeGroupID(ungrouped);
+}
+
+export function assertAtomicGroupTransactions(
+  txns: ReadonlyArray<algosdk.Transaction>
+): void {
+  if (txns.length <= 1) return;
+  const expected = expectedAtomicGroupId(txns);
+  if (isZeroGroup(expected)) {
+    throw new Error("Invalid atomic transaction group.");
+  }
+  for (const t of txns) {
+    if (!t.group?.length || Buffer.compare(t.group, expected) !== 0) {
+      throw new Error(
+        `Invalid atomic transaction group (${txns.length} transactions). Refresh and try again.`
+      );
+    }
+  }
+}
+
 /**
  * Assign group IDs only when needed (ulujs `custom()` groups are often already valid).
  */
@@ -67,16 +98,20 @@ export function ensureAtomicGroups(groups: algosdk.Transaction[][]): algosdk.Tra
       );
     }
     if (group.length <= 1) return group;
-    const expected = algosdk.computeGroupID(group);
-    const valid =
-      !isZeroGroup(expected) &&
-      group.every((t) => t.group && Buffer.compare(t.group, expected) === 0);
-    if (valid) return group;
-    const copy = group.map((t) =>
-      algosdk.decodeUnsignedTransaction(algosdk.encodeUnsignedTransaction(t))
-    );
-    algosdk.assignGroupID(copy);
-    return copy;
+    try {
+      assertAtomicGroupTransactions(group);
+      return group;
+    } catch {
+      const copy = group.map((t) =>
+        algosdk.decodeUnsignedTransaction(algosdk.encodeUnsignedTransaction(t))
+      );
+      for (const t of copy) {
+        t.group = undefined;
+      }
+      algosdk.assignGroupID(copy);
+      assertAtomicGroupTransactions(copy);
+      return copy;
+    }
   });
 }
 

@@ -1,0 +1,598 @@
+import algosdk, { type Algodv2, type Indexer } from "algosdk";
+import type { NetworkId } from "@/config";
+import { getAlgorandNetworkFromNetworkId } from "@/config";
+import {
+  bridgeCustodyAddress,
+  bridgeRegistrationLogAddresses,
+  DORK_NFT_BRIDGE_ADDRESS,
+  NFT_BRIDGE_NOTE_PREFIX,
+  type NftBridgeDirection,
+  type NftBridgeIntentItem,
+  type NftBridgeIntentPayload,
+} from "@/config/nftBridge";
+import {
+  getDorkNftByVoi,
+  type DorkNftEntry,
+} from "@/data/dorkNftAlgorandRegistry";
+import type { UserNFT } from "@/hooks/useUserNFTs";
+import { ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP } from "@/services/nftDripClaimService";
+import {
+  assertAtomicGroupTransactions,
+  encodeTransactionGroups,
+  ensureAtomicGroups,
+} from "@/lib/algorand/grouping";
+import algorandService from "@/services/algorandService";
+import { getUserFriendlyError } from "@/utils/errorUtils";
+
+/** Algorand node wording for a fee/min-balance shortfall. Does not contain the word "ALGO". */
+const BALANCE_BELOW_MIN = /balance\s+\d+\s+below\s+min\s+\d+\s*\(/;
+
+/** Strip whitespace from pasted addresses (spaces do not belong in on-chain notes). */
+export function normalizeBridgeAddressInput(raw: string): string {
+  return raw.replace(/\s+/g, "");
+}
+
+export type BridgeDestinationValidationResult =
+  | { ok: true; balanceMicro: bigint }
+  | { ok: false; message: string };
+
+/**
+ * Require a funded account on the **destination** chain before bridging.
+ * Voi accepts ARC-72 transfers to valid addresses even with 0 VOI — wrong paste is not recoverable.
+ */
+export async function validateBridgeDestinationWallet(args: {
+  direction: NftBridgeDirection;
+  receiver: string;
+}): Promise<BridgeDestinationValidationResult> {
+  const trimmed = normalizeBridgeAddressInput(args.receiver);
+  if (!algosdk.isValidAddress(trimmed)) {
+    const chain = args.direction === "algorand-to-voi" ? "Voi" : "Algorand";
+    return {
+      ok: false,
+      message: `Enter a valid ${chain} wallet address (58 characters, no spaces).`,
+    };
+  }
+
+  const destNetworkId: NetworkId =
+    args.direction === "algorand-to-voi" ? "voi-mainnet" : "algorand-mainnet";
+  const destLabel = destNetworkId === "voi-mainnet" ? "Voi" : "Algorand";
+  const nativeLabel = destNetworkId === "voi-mainnet" ? "VOI" : "ALGO";
+
+  const algoNet = getAlgorandNetworkFromNetworkId(destNetworkId);
+  if (!algoNet) {
+    return { ok: false, message: "Bridge destination network is not configured." };
+  }
+
+  const { indexer } = await algorandService.initializeClientsForReads(algoNet);
+  try {
+    const res = (await indexer.lookupAccountByID(trimmed).do()) as {
+      account?: { amount?: number | bigint };
+    };
+    const amount = BigInt(res.account?.amount ?? 0);
+    if (amount <= 0n) {
+      return {
+        ok: false,
+        message: `This address has no ${nativeLabel} on ${destLabel}. Send a small amount there first to confirm it is your wallet — NFTs sent to a wrong or empty address usually cannot be recovered.`,
+      };
+    }
+    return { ok: true, balanceMicro: amount };
+  } catch {
+    return {
+      ok: false,
+      message: `This address is not funded on ${destLabel}. Send a little ${nativeLabel} there before bridging so we know it is the correct destination.`,
+    };
+  }
+}
+
+export type BridgeableNft = UserNFT & {
+  sourceId: string;
+  /** On-chain id in bridge registration notes (ASA id or Voi contract:token). */
+  destAssetId: string;
+  /** Confirm / success step copy for what the receiver gets on the destination chain. */
+  receiveLine: string;
+};
+
+/** Map Algorand-node fee wording to Voi when the wallet pays fees in VOI. */
+export function formatBridgeFeeCurrencyError(
+  message: string,
+  currency: "VOI" | "ALGO"
+): string {
+  return currency === "VOI" ? message.replace(/\bALGO\b/g, "VOI") : message;
+}
+
+/**
+ * Returns a user-facing error when one or more signed bridge groups failed on-chain.
+ * `null` when every group confirmed.
+ */
+export function bridgeSubmitOutcomeError(args: {
+  failedGroupIndices: number[];
+  successfulTxIds: string[];
+  totalGroups: number;
+  firstGroupError?: string;
+  feeCurrency: "VOI" | "ALGO";
+  custodyLabel: string;
+}): string | null {
+  const {
+    failedGroupIndices,
+    successfulTxIds,
+    totalGroups,
+    firstGroupError,
+    feeCurrency,
+    custodyLabel,
+  } = args;
+  if (failedGroupIndices.length === 0) return null;
+
+  if (successfulTxIds.length === 0) {
+    const raw = firstGroupError ?? "Transaction could not be confirmed.";
+    // Node text is "balance N below min M" with no currency name. Friendly copy says ALGO;
+    // the VOI replace below is what Voi holders should see.
+    const forCurrency =
+      feeCurrency === "VOI" && BALANCE_BELOW_MIN.test(raw)
+        ? getUserFriendlyError(raw)
+        : raw;
+    return formatBridgeFeeCurrencyError(forCurrency, feeCurrency);
+  }
+
+  return `Only ${successfulTxIds.length} of ${totalGroups} transfers reached ${custodyLabel} before one failed. Check your wallet — some NFTs may already be in custody. Try again for any that did not send, or reach out on Discord if you are unsure.`;
+}
+
+export function formatBridgeReceiveLine(
+  entry: Pick<DorkNftEntry, "name" | "assetId" | "collectionName" | "voiTokenId">,
+  direction: NftBridgeDirection
+): string {
+  if (direction === "voi-to-algorand") {
+    return `${entry.name} → ASA ${entry.assetId}`;
+  }
+  return `${entry.name} → ${entry.collectionName} #${entry.voiTokenId}`;
+}
+
+export function bridgeDirectionForNetwork(
+  networkId: NetworkId
+): NftBridgeDirection {
+  return networkId === "voi-mainnet" ? "voi-to-algorand" : "algorand-to-voi";
+}
+
+export function destinationNetworkLabel(direction: NftBridgeDirection): string {
+  return direction === "voi-to-algorand" ? "Algorand" : "Voi";
+}
+
+export function sourceNetworkLabel(direction: NftBridgeDirection): string {
+  return direction === "voi-to-algorand" ? "Voi" : "Algorand";
+}
+
+export function enrichNftsForBridge(
+  nfts: UserNFT[],
+  direction: NftBridgeDirection
+): BridgeableNft[] {
+  const out: BridgeableNft[] = [];
+  for (const nft of nfts) {
+    const entry = getDorkNftByVoi(nft.contractId, Number(nft.tokenId));
+    if (!entry) continue;
+    const receiveLine = formatBridgeReceiveLine(entry, direction);
+    if (direction === "voi-to-algorand") {
+      out.push({
+        ...nft,
+        sourceId: `arc72:${nft.contractId}:${nft.tokenId}`,
+        destAssetId: String(entry.assetId),
+        receiveLine,
+      });
+    } else {
+      out.push({
+        ...nft,
+        sourceId: String(entry.assetId),
+        destAssetId: `${entry.voiContractId}:${entry.voiTokenId}`,
+        receiveLine,
+      });
+    }
+  }
+  return out;
+}
+
+/** Legacy bridge board: destination note is exactly the 58-char address, no prefix or JSON. */
+export function encodeLegacyBridgeDestinationNote(
+  receiver: string
+): Uint8Array | null {
+  const trimmed = normalizeBridgeAddressInput(receiver);
+  if (!algosdk.isValidAddress(trimmed)) return null;
+  const bytes = new TextEncoder().encode(trimmed);
+  if (bytes.length !== 58) return null;
+  return bytes;
+}
+
+export function encodeBridgeIntentNote(payload: NftBridgeIntentPayload): Uint8Array {
+  const json = JSON.stringify(payload);
+  const note = `${NFT_BRIDGE_NOTE_PREFIX}${json}`;
+  const bytes = new TextEncoder().encode(note);
+  if (bytes.length > 1024) {
+    throw new Error("Bridge intent note is too large; select fewer NFTs.");
+  }
+  return bytes;
+}
+
+export function parseBridgeIntentNote(
+  note: Uint8Array | string | undefined
+): NftBridgeIntentPayload | null {
+  if (!note) return null;
+  let text: string;
+  if (typeof note === "string") {
+    text = note;
+  } else {
+    text = new TextDecoder().decode(note);
+  }
+  if (!text.startsWith(NFT_BRIDGE_NOTE_PREFIX)) return null;
+  try {
+    const parsed = JSON.parse(text.slice(NFT_BRIDGE_NOTE_PREFIX.length)) as NftBridgeIntentPayload;
+    if (parsed?.v !== 1 || !parsed.receiver || !Array.isArray(parsed.items)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSuggestedParams(
+  params: algosdk.SuggestedParams
+): algosdk.SuggestedParams {
+  return {
+    ...params,
+    fee: BigInt(params.fee),
+    firstValid: BigInt(params.firstValid),
+    lastValid: BigInt(params.lastValid),
+    minFee: params.minFee != null ? BigInt(params.minFee) : undefined,
+  };
+}
+
+function bridgeIntentItemsFromSelection(
+  selected: BridgeableNft[]
+): NftBridgeIntentItem[] {
+  return selected.map((nft) => ({
+    sourceId: nft.sourceId,
+    destAssetId: nft.destAssetId,
+    name: nft.name,
+  }));
+}
+
+/**
+ * ulujs ARC-72 reads `min-balance` from algod account JSON; algosdk v3 exposes `minBalance`.
+ * Without this shim, transfer simulation throws (BigInt mix / undefined min balance).
+ */
+export function algodClientForUlujsArc72(algod: Algodv2): Algodv2 {
+  return new Proxy(algod, {
+    get(target, prop, receiver) {
+      if (prop === "accountInformation") {
+        return (address: string) => {
+          const req = target.accountInformation(address);
+          const originalDo = req.do.bind(req);
+          req.do = async () => {
+            const info = (await originalDo()) as Record<string, unknown>;
+            const amount = info.amount;
+            const minRaw = info["min-balance"] ?? info.minBalance ?? 0;
+            return {
+              ...info,
+              amount: typeof amount === "bigint" ? amount : BigInt(String(amount ?? 0)),
+              "min-balance":
+                typeof minRaw === "bigint" ? minRaw : BigInt(String(minRaw)),
+            };
+          };
+          return req;
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Algodv2;
+}
+
+async function buildArc72TransferBytes(
+  contractId: number,
+  tokenId: string,
+  sender: string,
+  algod: Algodv2,
+  indexer: Indexer
+): Promise<algosdk.Transaction[]> {
+  const Arc72 = (await import("ulujs/impl/arc72/index.js")).default;
+  const algodForArc72 = algodClientForUlujsArc72(algod);
+  const contract = new Arc72(contractId, algodForArc72, indexer, {
+    simulate: true,
+    acc: { addr: sender },
+  });
+  const result = await contract.arc72_transferFrom(
+    sender,
+    DORK_NFT_BRIDGE_ADDRESS,
+    BigInt(tokenId),
+    true,
+    false
+  );
+  if (!result?.success || !Array.isArray(result.txns)) {
+    const detail =
+      (result as { message?: string; error?: string } | undefined)?.message ??
+      (result as { error?: string } | undefined)?.error;
+    throw new Error(
+      detail
+        ? `Could not build Voi NFT transfer for token ${tokenId}: ${detail}`
+        : `Could not build Voi NFT transfer for token ${tokenId}.`
+    );
+  }
+  return (result.txns as string[]).map((b64) =>
+    algosdk.decodeUnsignedTransaction(
+      Uint8Array.from(Buffer.from(b64, "base64"))
+    )
+  );
+}
+
+async function buildVoiBridgeGroupForNft(
+  nft: BridgeableNft,
+  sender: string,
+  receiver: string,
+  direction: NftBridgeDirection,
+  algod: Algodv2,
+  indexer: Indexer
+): Promise<algosdk.Transaction[]> {
+  const params = normalizeSuggestedParams(await algod.getTransactionParams().do());
+  const transferTxns = await buildArc72TransferBytes(
+    nft.contractId,
+    nft.tokenId,
+    sender,
+    algod,
+    indexer
+  );
+  const note = encodeBridgeIntentNote({
+    v: 1,
+    dir: direction,
+    receiver,
+    sender,
+    items: bridgeIntentItemsFromSelection([nft]),
+  });
+  const minFee = params.minFee ?? 1000n;
+  /** 0 VOI payment — carries bridge intent note; fees are paid in VOI on Voi mainnet. */
+  const registration = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    sender,
+    receiver: DORK_NFT_BRIDGE_ADDRESS,
+    amount: 0n,
+    note,
+    suggestedParams: { ...params, flatFee: true, fee: minFee },
+  });
+  const group: algosdk.Transaction[] = [...transferTxns, registration];
+  const legacyDestNote = encodeLegacyBridgeDestinationNote(receiver);
+  if (legacyDestNote) {
+    /** Legacy forward path: depositor 0-VOI to DEVOUR with address-only note (bridge.py `_forward_destination`). */
+    group.push(
+      algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+        sender,
+        receiver: DORK_NFT_BRIDGE_ADDRESS,
+        amount: 0n,
+        note: legacyDestNote,
+        suggestedParams: { ...params, flatFee: true, fee: minFee },
+      })
+    );
+  }
+  if (group.length > ALGORAND_MAX_TXNS_PER_ATOMIC_GROUP) {
+    throw new Error("Bridge transaction group is too large for this NFT.");
+  }
+  assignVoiBridgeAtomicGroup(group, minFee);
+  return group;
+}
+
+/**
+ * ulujs ARC-72 bytes may carry a stale `group` from simulation — clear before re-grouping.
+ * Keep a positive fee on every txn (Voi Wallet rejects some zero-fee follower groups).
+ */
+function assignVoiBridgeAtomicGroup(
+  group: algosdk.Transaction[],
+  minFee: bigint
+): void {
+  for (const txn of group) {
+    txn.group = undefined;
+    if (BigInt(txn.fee) < minFee) {
+      txn.fee = minFee;
+    }
+  }
+  const minTotal = minFee * BigInt(group.length);
+  if (BigInt(group[0]!.fee) < minTotal) {
+    group[0]!.fee = minTotal;
+  }
+  algosdk.assignGroupID(group);
+  assertAtomicGroupTransactions(group);
+}
+
+async function buildAlgorandBridgeGroupForNft(
+  nft: BridgeableNft,
+  sender: string,
+  receiver: string,
+  direction: NftBridgeDirection,
+  algod: Algodv2
+): Promise<algosdk.Transaction[]> {
+  const entry = getDorkNftByVoi(nft.contractId, Number(nft.tokenId));
+  if (!entry) {
+    throw new Error(`Unknown Dork ASA mapping for ${nft.name}.`);
+  }
+  const custody = bridgeCustodyAddress(direction);
+  const params = normalizeSuggestedParams(await algod.getTransactionParams().do());
+  const legacyDestNote = encodeLegacyBridgeDestinationNote(receiver);
+  if (!legacyDestNote) {
+    throw new Error(
+      `Enter a valid ${direction === "algorand-to-voi" ? "Voi" : "Algorand"} destination address.`
+    );
+  }
+  const jsonNote = encodeBridgeIntentNote({
+    v: 1,
+    dir: direction,
+    receiver,
+    sender,
+    items: bridgeIntentItemsFromSelection([nft]),
+  });
+  /** Return leg: legacy bridge expects the Voi receiver as the only axfer note bytes. */
+  const axfer = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+    sender,
+    receiver: custody,
+    assetIndex: entry.assetId,
+    amount: 1n,
+    note: legacyDestNote,
+    suggestedParams: { ...params, flatFee: true, fee: 2000n },
+  });
+  /** Structured intent for DorkFi admin / automation (`notePrefix` scan on DEVOUR). */
+  const registration = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    sender,
+    receiver: DORK_NFT_BRIDGE_ADDRESS,
+    amount: 0n,
+    note: jsonNote,
+    suggestedParams: { ...params, flatFee: true, fee: 1000n },
+  });
+  const group = [axfer, registration];
+  algosdk.assignGroupID(group);
+  return group;
+}
+
+export type NftBridgeSigningBundle = {
+  unsignedFlat: Uint8Array[];
+  groupSizes: number[];
+  preparedGroups: Uint8Array[][];
+  destAssetsForReceiver: {
+    receiveLine: string;
+    lineKey: string;
+  }[];
+};
+
+export async function buildNftBridgeSigningBundle(args: {
+  networkId: NetworkId;
+  sender: string;
+  receiver: string;
+  selected: BridgeableNft[];
+}): Promise<NftBridgeSigningBundle> {
+  const { networkId, sender, receiver, selected } = args;
+  if (selected.length === 0) {
+    throw new Error("Select at least one NFT to bridge.");
+  }
+  const normalizedReceiver = normalizeBridgeAddressInput(receiver);
+  if (!algosdk.isValidAddress(normalizedReceiver)) {
+    throw new Error("Enter a valid destination wallet address.");
+  }
+
+  const algoNet = getAlgorandNetworkFromNetworkId(networkId);
+  if (!algoNet) {
+    throw new Error("NFT bridge is only available on Voi or Algorand mainnet.");
+  }
+
+  const { algod, indexer } = await algorandService.initializeClientsForReads(algoNet);
+  const direction = bridgeDirectionForNetwork(networkId);
+
+  const atomicGroups: algosdk.Transaction[][] = [];
+  for (const nft of selected) {
+    if (direction === "voi-to-algorand") {
+      atomicGroups.push(
+        await buildVoiBridgeGroupForNft(
+          nft,
+          sender,
+          normalizedReceiver,
+          direction,
+          algod,
+          indexer
+        )
+      );
+    } else {
+      atomicGroups.push(
+        await buildAlgorandBridgeGroupForNft(
+          nft,
+          sender,
+          normalizedReceiver,
+          direction,
+          algod
+        )
+      );
+    }
+  }
+
+  const normalizedGroups = ensureAtomicGroups(atomicGroups);
+  const preparedGroups = encodeTransactionGroups(normalizedGroups);
+  const groupSizes = preparedGroups.map((g) => g.length);
+  const unsignedFlat = preparedGroups.flat();
+
+  const destAssetsForReceiver = selected.map((nft) => ({
+    receiveLine: nft.receiveLine,
+    lineKey: `${nft.contractId}-${nft.tokenId}`,
+  }));
+
+  return { unsignedFlat, groupSizes, preparedGroups, destAssetsForReceiver };
+}
+
+/** Flatten groups for wallet signing (same pattern as NFT drip claims). */
+export function flattenBridgeGroupsForSigning(
+  preparedGroups: Uint8Array[][]
+): Pick<NftBridgeSigningBundle, "unsignedFlat" | "groupSizes" | "preparedGroups"> {
+  const groupSizes = preparedGroups.map((g) => g.length);
+  return {
+    preparedGroups,
+    groupSizes,
+    unsignedFlat: preparedGroups.flat(),
+  };
+}
+
+export type ParsedBridgeIntent = NftBridgeIntentPayload & {
+  txId: string;
+  round: number;
+  /** Chain where the registration note was observed (user’s bridge source network). */
+  sourceNetworkId: NetworkId;
+  /** Account that received the registration note or tagged asset transfer. */
+  custodyAddress: string;
+};
+
+async function fetchBridgeIntentsForAddress(
+  networkId: NetworkId,
+  custodyAddress: string,
+  limit: number
+): Promise<ParsedBridgeIntent[]> {
+  const algoNet = getAlgorandNetworkFromNetworkId(networkId);
+  if (!algoNet) return [];
+  const { indexer } = await algorandService.initializeClientsForReads(algoNet);
+  const prefix = new TextEncoder().encode(NFT_BRIDGE_NOTE_PREFIX);
+
+  const response = indexer
+    .searchForTransactions()
+    .address(custodyAddress)
+    .notePrefix(prefix)
+    .limit(Math.min(limit, 100));
+
+  const res = (await response.do()) as {
+    transactions?: Array<{
+      id?: string;
+      ["confirmed-round"]?: number;
+      transaction?: { note?: string };
+    }>;
+  };
+
+  const out: ParsedBridgeIntent[] = [];
+  for (const row of res.transactions ?? []) {
+    const noteB64 = row.transaction?.note;
+    if (!noteB64) continue;
+    const noteBytes = Uint8Array.from(Buffer.from(noteB64, "base64"));
+    const parsed = parseBridgeIntentNote(noteBytes);
+    if (!parsed) continue;
+    out.push({
+      ...parsed,
+      txId: row.id ?? "",
+      round: row["confirmed-round"] ?? 0,
+      sourceNetworkId: networkId,
+      custodyAddress,
+    });
+  }
+  return out;
+}
+
+export async function fetchPendingBridgeIntents(
+  networkId: NetworkId,
+  limit = 50
+): Promise<ParsedBridgeIntent[]> {
+  if (networkId !== "voi-mainnet" && networkId !== "algorand-mainnet") {
+    return [];
+  }
+  const addresses = bridgeRegistrationLogAddresses(networkId);
+  const batches = await Promise.all(
+    addresses.map((addr) => fetchBridgeIntentsForAddress(networkId, addr, limit))
+  );
+  const byTx = new Map<string, ParsedBridgeIntent>();
+  for (const row of batches.flat()) {
+    if (row.txId && !byTx.has(row.txId)) {
+      byTx.set(row.txId, row);
+    }
+  }
+  return [...byTx.values()].sort((a, b) => b.round - a.round);
+}
