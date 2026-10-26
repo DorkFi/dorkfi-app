@@ -22,6 +22,10 @@ import {
   ensureAtomicGroups,
 } from "@/lib/algorand/grouping";
 import algorandService from "@/services/algorandService";
+import { getUserFriendlyError } from "@/utils/errorUtils";
+
+/** Algorand node wording for a fee/min-balance shortfall. Does not contain the word "ALGO". */
+const BALANCE_BELOW_MIN = /balance\s+\d+\s+below\s+min\s+\d+\s*\(/;
 
 /** Strip whitespace from pasted addresses (spaces do not belong in on-chain notes). */
 export function normalizeBridgeAddressInput(raw: string): string {
@@ -120,7 +124,13 @@ export function bridgeSubmitOutcomeError(args: {
 
   if (successfulTxIds.length === 0) {
     const raw = firstGroupError ?? "Transaction could not be confirmed.";
-    return formatBridgeFeeCurrencyError(raw, feeCurrency);
+    // Node text is "balance N below min M" with no currency name. Friendly copy says ALGO;
+    // the VOI replace below is what Voi holders should see.
+    const forCurrency =
+      feeCurrency === "VOI" && BALANCE_BELOW_MIN.test(raw)
+        ? getUserFriendlyError(raw)
+        : raw;
+    return formatBridgeFeeCurrencyError(forCurrency, feeCurrency);
   }
 
   return `Only ${successfulTxIds.length} of ${totalGroups} transfers reached ${custodyLabel} before one failed. Check your wallet — some NFTs may already be in custody. Try again for any that did not send, or reach out on Discord if you are unsure.`;
