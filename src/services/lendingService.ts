@@ -1901,6 +1901,97 @@ export const fillMissingUserMarketRowsFromChain = async (
   return extra;
 };
 
+/**
+ * One pool's `get_global_user` plus one market's `get_user`, read from algod
+ * with no RPC cache. Used to paint a position immediately after a confirmed
+ * transaction, before the API user snapshot sweep includes it.
+ */
+export async function fetchUserPositionSnapshotFromChain(
+  userAddress: string,
+  networkId: NetworkId,
+  poolId: string,
+  marketId: string
+): Promise<{
+  userRow: ChainUserDataRow | null;
+  globalRow: ChainGlobalUserRow | null;
+}> {
+  if (!isAlgorandCompatibleNetwork(networkId)) {
+    return { userRow: null, globalRow: null };
+  }
+
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+    const clients = await algorandService.initializeClientsForReads(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+    const poolIdNum = Number(poolId);
+    const marketIdNum = Number(marketId);
+    if (!Number.isFinite(poolIdNum) || !Number.isFinite(marketIdNum)) {
+      return { userRow: null, globalRow: null };
+    }
+
+    const ci = new CONTRACT(
+      poolIdNum,
+      clients.algod,
+      undefined,
+      { ...LendingPoolAppSpec.contract, events: [] },
+      {
+        addr: algosdk.encodeAddress(
+          algosdk.getApplicationAddress(poolIdNum).publicKey
+        ),
+        sk: new Uint8Array(),
+      }
+    );
+    ci.setFee(2000);
+
+    let globalRow: ChainGlobalUserRow | null = null;
+    let userRow: ChainUserDataRow | null = null;
+
+    try {
+      const globalUserR = await ci.get_global_user(userAddress);
+      if (globalUserR.success) {
+        const globalUser = GlobalUserData(globalUserR.returnValue);
+        globalRow = {
+          network: networkId,
+          poolId: String(poolId),
+          totalCollateralValue: globalUser.totalCollateralValue.toString(),
+          totalBorrowValue: globalUser.totalBorrowValue.toString(),
+        };
+      }
+    } catch (error) {
+      console.warn(
+        "[fetchUserPositionSnapshotFromChain] get_global_user",
+        error
+      );
+    }
+
+    try {
+      const userDataR = await ci.get_user(userAddress, marketIdNum);
+      if (userDataR.success) {
+        const ud = UserData(userDataR.returnValue);
+        userRow = {
+          network: networkId,
+          marketId: String(marketId),
+          underlyingContractId: String(marketId),
+          appId: String(poolId),
+          poolId: String(poolId),
+          scaledDeposits: (ud.scaledDeposits ?? 0n).toString(),
+          scaledBorrows: (ud.scaledBorrows ?? 0n).toString(),
+          depositIndex: (ud.depositIndex ?? 0n).toString(),
+          borrowIndex: (ud.borrowIndex ?? 0n).toString(),
+        };
+      }
+    } catch (error) {
+      console.warn("[fetchUserPositionSnapshotFromChain] get_user", error);
+    }
+
+    return { userRow, globalRow };
+  } catch (error) {
+    console.warn("[fetchUserPositionSnapshotFromChain]", error);
+    return { userRow: null, globalRow: null };
+  }
+}
+
 /** Debt split from scaled borrows and borrow indices (matches pool accounting). */
 export type BorrowDebtFromIndices = {
   /** Underlying at user's last borrow-index snapshot: scaled × I_user ÷ SCALE */
@@ -5837,6 +5928,167 @@ export const migrate = async (
     return {
       success: false,
       error: error instanceof Error ? error.message : "Migration failed",
+    };
+  }
+};
+
+/**
+ * Withdraw a PreFi / legacy-pool position back to the wallet.
+ * PreFi pools expose `withdraw(uint64,uint256)void` (not the live pool's uint256 return),
+ * so this does not call {@link withdraw}. ASA and network positions are then unwrapped
+ * from the legacy nt200 contract. Nothing is deposited into the current market.
+ */
+export const withdrawMigration = async (
+  oldPoolId: string,
+  oldContractId: string,
+  oldNTokenId: string,
+  tokenStandard: TokenStandard,
+  amountAtomic: string,
+  userAddress: string,
+  networkId: NetworkId
+): Promise<
+  { success: false; error?: string } | { success: true; txns: string[] }
+> => {
+  console.log("withdrawMigration", {
+    oldPoolId,
+    oldContractId,
+    oldNTokenId,
+    tokenStandard,
+    amountAtomic,
+    userAddress,
+    networkId,
+  });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (!isAlgorandCompatibleNetwork(networkId)) {
+      throw new Error(
+        isEVMNetwork(networkId)
+          ? "EVM networks are not supported yet"
+          : "Unsupported network"
+      );
+    }
+
+    if (!/^\d+$/.test(amountAtomic) || BigInt(amountAtomic) === 0n) {
+      throw new Error("No balance to withdraw");
+    }
+
+    const bigAmount = BigInt(amountAtomic);
+    const clients = await algorandService.initializeClientsForReads(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    const ci = new CONTRACT(
+      Number(oldNTokenId),
+      clients.algod,
+      undefined,
+      abi.custom,
+      {
+        addr: userAddress,
+        sk: new Uint8Array(),
+      }
+    );
+
+    const builder = {
+      oldToken: new CONTRACT(
+        Number(oldContractId),
+        clients.algod,
+        undefined,
+        abi.nt200,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      ),
+      oldLendingPool: new CONTRACT(
+        Number(oldPoolId),
+        clients.algod,
+        undefined,
+        {
+          ...LendingPoolAppSpec.contract,
+          events: [],
+          methods: [
+            {
+              name: "withdraw",
+              args: [
+                { type: "uint64", name: "market_id" },
+                { type: "uint256", name: "amount" },
+              ],
+              readonly: false,
+              returns: { type: "void" },
+            },
+          ],
+        },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      ),
+    };
+
+    const shouldUnwrap =
+      tokenStandard === "network" ||
+      tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
+
+    if (shouldUnwrap && bigAmount > BigInt("18446744073709551615")) {
+      throw new Error("Withdraw amount exceeds the legacy token limit");
+    }
+
+    let customR: { success: boolean; txns?: string[] } | undefined;
+
+    for (const poolPayment of [0, 100000]) {
+      const buildN = [];
+      const poolWithdraw = (
+        await builder.oldLendingPool.withdraw(Number(oldContractId), bigAmount)
+      ).obj;
+      buildN.push({
+        ...poolWithdraw,
+        note: new TextEncoder().encode("lending withdraw"),
+        payment: poolPayment,
+      });
+
+      if (shouldUnwrap) {
+        const tokenWithdraw = (await builder.oldToken.withdraw(bigAmount)).obj;
+        buildN.push({
+          ...tokenWithdraw,
+          note: new TextEncoder().encode("atoken withdraw"),
+        });
+      }
+
+      ci.setFee(20000);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+      if (networkConfig.networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839);
+      }
+
+      customR = await ci.custom();
+      console.log("withdrawMigration", { poolPayment, customR });
+      if (customR.success) {
+        break;
+      }
+    }
+
+    if (!customR?.success || !customR.txns) {
+      throw new Error("Failed to create withdraw transaction");
+    }
+
+    return {
+      success: true,
+      txns: customR.txns,
+    };
+  } catch (error) {
+    console.error("Error withdrawing migration balance:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Withdraw failed",
     };
   }
 };

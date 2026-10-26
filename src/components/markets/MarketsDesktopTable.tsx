@@ -50,6 +50,7 @@ interface MarketsDesktopTableProps {
   onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
+  onMigrationWithdrawClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
   getMarketActionHoverHandlers?: (
     asset: string,
@@ -98,6 +99,7 @@ const MarketsDesktopTable = ({
   onBorrowClick,
   onMintClick,
   onMigrateClick,
+  onMigrationWithdrawClick,
   isLoadingBalance = false,
   getMarketActionHoverHandlers,
   onRowMouseEnter,
@@ -705,6 +707,13 @@ const MarketsDesktopTable = ({
                     ? onMigrateClick
                     : undefined
                 }
+                onMigrationWithdrawClick={
+                  onMigrationWithdrawClick &&
+                  hasMigration &&
+                  migrationBalance
+                    ? onMigrationWithdrawClick
+                    : undefined
+                }
                 migrationBalance={migrationBalance || undefined}
                 isLoadingBalance={isLoadingBalance}
                 isSToken={market.isSToken}
@@ -1078,6 +1087,13 @@ const MarketsDesktopTable = ({
                             hasMigration &&
                             migrationBalance
                               ? onMigrateClick
+                              : undefined
+                          }
+                          onMigrationWithdrawClick={
+                            onMigrationWithdrawClick &&
+                            hasMigration &&
+                            migrationBalance
+                              ? onMigrationWithdrawClick
                               : undefined
                           }
                           migrationBalance={migrationBalance || undefined}

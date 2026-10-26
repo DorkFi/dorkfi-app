@@ -25,6 +25,7 @@ import {
   resolveWithLastGoodPortfolioUsd,
 } from "@/utils/portfolioUsdCache";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import { runWithConcurrency } from "@/utils/runWithConcurrency";
 
 export type PortfolioChainLiveOverride = {
   balance?: number;
@@ -353,13 +354,13 @@ export function usePortfolioVisibleChainLive(opts: {
     const batch: Record<string, PortfolioChainLiveOverride> = {};
     const folksMintCache = new Map<string, bigint>();
 
-    for (const portfolioKey of keys) {
+    await runWithConcurrency(keys, 4, async (portfolioKey) => {
       const parsedKey = parseChainKey(portfolioKey);
-      if (!parsedKey) continue;
+      if (!parsedKey) return;
       const { kind, network, poolId, asset, marketId } = parsedKey;
       const networkId = network as NetworkId;
       const token = resolvePollToken(networkId, poolId, asset, marketId);
-      if (!token?.underlyingContractId || !token.poolId) continue;
+      if (!token?.underlyingContractId || !token.poolId) return;
 
       const mkt = marketRowForPortfolioPosition(marketData as unknown[], {
         marketId: token.underlyingContractId,
@@ -385,7 +386,7 @@ export function usePortfolioVisibleChainLive(opts: {
             token.underlyingContractId,
             networkId
           );
-          if (bal == null) continue;
+          if (bal == null) return;
           const minted = await folksMintedFAssetForOneUnderlyingAtomic(
             networkId,
             token,
@@ -404,7 +405,7 @@ export function usePortfolioVisibleChainLive(opts: {
             token.underlyingContractId,
             networkId
           );
-          if (!borrow) continue;
+          if (!borrow) return;
           batch[portfolioKey] = {
             balance: borrow.balance,
             value: borrow.balance * tp,
@@ -419,7 +420,7 @@ export function usePortfolioVisibleChainLive(opts: {
           e
         );
       }
-    }
+    });
 
     if (Object.keys(batch).length > 0) {
       setOverrides((prev) => ({ ...prev, ...batch }));
@@ -476,7 +477,7 @@ export function usePortfolioVisibleChainLive(opts: {
       groups.get(snapId)!.rows.push({ portfolioKey, kind });
     }
 
-    for (const group of groups.values()) {
+    await runWithConcurrency([...groups.values()], 3, async (group) => {
       // POST `/market-data/...` so the API refreshes its chain snapshot for this
       // visible position before we load fresh user data (indexer) for the same group.
       try {
@@ -673,7 +674,7 @@ export function usePortfolioVisibleChainLive(opts: {
           );
         }
       }
-    }
+    });
   }, [address, marketData, useApiUserData]);
 
   const fetchVisible = useCallback(

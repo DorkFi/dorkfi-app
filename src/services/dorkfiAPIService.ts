@@ -797,7 +797,8 @@ class DorkFiAPIService {
   async getUser(userAddress: string): Promise<ApiResponse<User>> {
     try {
       const response = await fetch(
-        `${this.baseUrl}/users/${encodeURIComponent(userAddress)}`
+        `${this.baseUrl}/users/${encodeURIComponent(userAddress)}`,
+        { cache: "no-store" }
       );
 
       if (!response.ok) {
@@ -961,6 +962,7 @@ class DorkFiAPIService {
         )}/${encodeURIComponent(network)}/${appId}/${marketId}`,
         {
           method: "POST",
+          cache: "no-store",
         }
       );
 
