@@ -6,7 +6,6 @@ import DorkFiCard from "@/components/ui/DorkFiCard";
 import {
   DORK_NFT_ALGORAND_RESERVE_ADDRESS,
   DORK_NFT_BRIDGE_ADDRESS,
-  isNftBridgeDryRun,
 } from "@/config/nftBridge";
 import type { NetworkId } from "@/config";
 import { useToast } from "@/hooks/use-toast";
@@ -116,7 +115,6 @@ export default function PortfolioNftBridgeNotice({
 
   const bridgeLabel =
     networkId === "voi-mainnet" ? "Bridge NFTs to Algorand" : "Bridge NFTs to Voi";
-  const bridgeDryRun = isNftBridgeDryRun();
 
   return (
     <>
@@ -156,13 +154,6 @@ export default function PortfolioNftBridgeNotice({
                 {copied ? "Copied" : custodyButtonLabel}
               </DorkFiButton>
             </div>
-            {bridgeDryRun && (
-              <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                Dry-run mode: bridge builds txs only until{" "}
-                <code className="rounded bg-muted px-1">VITE_NFT_BRIDGE_DRY_RUN=false</code> (restart
-                dev) or a production deploy.
-              </p>
-            )}
             {!canBridge && (
               <p className="text-xs text-muted-foreground">
                 Connect this wallet to sign bridge transactions (view-only addresses cannot bridge).

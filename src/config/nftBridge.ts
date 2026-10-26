@@ -42,22 +42,6 @@ export function bridgeCustodyLabel(direction: NftBridgeDirection): "DEVOUR" | "D
   return direction === "algorand-to-voi" ? "DORKHJ" : "DEVOUR";
 }
 
-/**
- * Dry-run mode: builds transaction groups but skips wallet sign and broadcast.
- *
- * - **`npm run dev`:** ON by default (safe UI / tx-build testing only).
- * - **Production build:** OFF (live sign + submit unless `VITE_NFT_BRIDGE_DRY_RUN=true`).
- * - **Final mainnet testing (ALGO ↔ VOI):** set `VITE_NFT_BRIDGE_DRY_RUN=false` in `.env.local` and restart the dev server, or test a production/preview deploy without that flag.
- *
- * Remove or change the dev default before calling the bridge production-ready if dev should match prod.
- */
-export function isNftBridgeDryRun(): boolean {
-  const raw = import.meta.env.VITE_NFT_BRIDGE_DRY_RUN;
-  if (raw === "true" || raw === "1") return true;
-  if (raw === "false" || raw === "0") return false;
-  return import.meta.env.DEV;
-}
-
 export function bridgeRegistrationLogAddresses(networkId: "voi-mainnet" | "algorand-mainnet"): string[] {
   if (networkId === "voi-mainnet") {
     return [DORK_NFT_BRIDGE_ADDRESS];
