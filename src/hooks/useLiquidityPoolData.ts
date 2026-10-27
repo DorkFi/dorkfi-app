@@ -8,11 +8,16 @@ import {
   fetchUserGlobalDataForPool,
 } from "@/services/lendingService";
 import {
+  fetchPactTierSnapshot,
+  type PactTierSnapshot,
+} from "@/services/pactLiquidityService";
+import {
   fetchLiquidityPoolSnapshot,
   fetchLiquidityPoolUserPosition,
   fetchAlgorandAssetBalance,
   fetchNt200Arc200Balance,
   type LiquidityPoolApr,
+  type LiquidityPoolSnapshot,
 } from "@/services/tinymanLiquidityService";
 
 export function getLiquidityPoolDisplayAprPercent(
@@ -27,18 +32,30 @@ export function useLiquidityPoolsOrderedByApr(
 ) {
   const snapshots = useQueries({
     queries: pairs.map((pair) => ({
-      queryKey: ["liquidity-pool-snapshot", pair.id, pair.networkId],
-      queryFn: () => fetchLiquidityPoolSnapshot(pair),
+      queryKey:
+        pair.platform === "pact"
+          ? ["pact-tier-snapshot", pair.id, pair.networkId]
+          : ["liquidity-pool-snapshot", pair.id, pair.networkId],
+      queryFn: () =>
+        pair.platform === "pact"
+          ? fetchPactTierSnapshot(pair)
+          : fetchLiquidityPoolSnapshot(pair),
       staleTime: 30_000,
     })),
   });
 
   return useMemo(() => {
     return pairs
-      .map((pair, index) => ({
-        pair,
-        apr: getLiquidityPoolDisplayAprPercent(snapshots[index]?.data?.apr),
-      }))
+      .map((pair, index) => {
+        const data = snapshots[index]?.data;
+        const apr =
+          pair.platform === "pact"
+            ? ((data as PactTierSnapshot | null | undefined)?.aprPercent ?? null)
+            : getLiquidityPoolDisplayAprPercent(
+                (data as LiquidityPoolSnapshot | null | undefined)?.apr
+              );
+        return { pair, apr };
+      })
       .sort((a, b) => {
         if (a.apr == null && b.apr == null) return 0;
         if (a.apr == null) return 1;
@@ -112,6 +129,9 @@ export function useInvalidateLiquidityPools(pairs: LiquidityPoolPairConfig[]) {
       });
       void queryClient.invalidateQueries({
         queryKey: ["nt200-arc200-balance", pair.networkId, pair.lpContractId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["pact-tier-snapshot", pair.id, pair.networkId],
       });
     });
   };

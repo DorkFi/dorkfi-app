@@ -1,5 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
-import { getLendingPoolLabel, type NetworkId } from "@/config";
+import type { NetworkId } from "@/config";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import type { PoolsLendingGlobalSummary as PoolsLendingGlobalSummaryData } from "@/hooks/useLiquidityPoolData";
 import { Landmark } from "lucide-react";
@@ -27,14 +27,6 @@ const PoolsLendingGlobalSummary = ({
     return null;
   }
 
-  const poolLabels = poolIds.map((poolId) =>
-    getLendingPoolLabel(networkId, poolId)
-  );
-  const poolLabelText =
-    poolLabels.length === 1
-      ? `Pool ${poolLabels[0]}`
-      : `Pools ${poolLabels.join(", ")}`;
-
   return (
     <div className="mb-4 rounded-xl border border-ocean-teal/25 bg-ocean-teal/5 px-4 py-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -48,8 +40,8 @@ const PoolsLendingGlobalSummary = ({
               {filterSymbol} lending position
             </p>
             <p className="text-xs text-muted-foreground">
-              Global collateral and borrows in {poolLabelText} from {filterSymbol}{" "}
-              LP markets on this page.
+              Global collateral and borrows from {filterSymbol} LP markets on this
+              page.
             </p>
           </div>
         </div>
