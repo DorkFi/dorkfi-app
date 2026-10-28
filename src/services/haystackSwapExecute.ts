@@ -1,6 +1,10 @@
 import type { Transaction } from "algosdk";
-import type { Wallet } from "@txnlab/use-wallet-react";
-import { RouterClient, type SwapComposer, type FetchQuoteResponse } from "@txnlab/haystack-router";
+import {
+  RouterClient,
+  SwapComposerStatus,
+  type SwapComposer,
+  type FetchQuoteResponse,
+} from "@txnlab/haystack-router";
 import type {
   HaystackQuoteResponse,
 } from "@/services/haystackRouterService";
@@ -52,7 +56,10 @@ export function pickSwapTxIdFromComposer(
     result?.txIds?.find((id) => typeof id === "string" && id.length > 0) ??
     result?.txIds?.[0];
   if (fromResult) return fromResult;
+  // An unsigned group already has a transaction id. Only recover one after
+  // the group was actually submitted, so a failed signature is not a success.
   try {
+    if (swap.getStatus() < SwapComposerStatus.SUBMITTED) return undefined;
     return swap.getInputTransactionId() ?? undefined;
   } catch {
     return undefined;
@@ -79,7 +86,8 @@ export async function executeHaystackSwap(args: {
     txnGroup: Transaction[],
     indexesToSign: number[]
   ) => Promise<Uint8Array[]>;
-  activeWallet: Wallet | null | undefined;
+  /** Connected wallet, or the Easy Start synthetic wallet. Used to clear the dialog overlay while signing. */
+  activeWallet: { id: string } | null | undefined;
   setRainbowkitSuppressed?: (v: boolean) => void;
 }): Promise<ExecuteHaystackSwapResult> {
   if (!args.quote?.txnPayload) {
@@ -115,7 +123,8 @@ export async function executeHaystackSwap(args: {
     }
     return { txId, confirmedOrSubmitted: true };
   } catch (error) {
-    // Swap may have already been submitted/confirmed before a late error.
+    // A confirmation bookkeeping error can land after the group is already
+    // submitted. An unsigned group is not a submit.
     if (swap) {
       const recovered = pickSwapTxIdFromComposer(null, swap);
       if (recovered) {

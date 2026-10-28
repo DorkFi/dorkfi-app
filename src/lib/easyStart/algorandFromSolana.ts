@@ -100,3 +100,45 @@ export function assertSolanaOwnsAlgorandAddress(args: {
 
   return { solanaAddress, algorandAddress };
 }
+
+/**
+ * Coinbase ALGO must land on the xChain account owned by an EVM address
+ * already on this session.
+ */
+export async function assertEvmOwnsXchainAddress(args: {
+  evmAddresses: readonly string[];
+  algorandAddress: string;
+  derive: (evmAddress: string) => Promise<string>;
+}): Promise<string> {
+  const evmAddresses = args.evmAddresses
+    .map((address) => address.trim())
+    .filter((address) => address.length > 0);
+  if (evmAddresses.length === 0) {
+    throw new AlgoOnrampBindError(
+      403,
+      "EVM wallet is not on this session. Sign in again."
+    );
+  }
+
+  let canonical: string;
+  try {
+    canonical = canonicalAlgorandAddress(args.algorandAddress);
+  } catch {
+    throw new AlgoOnrampBindError(400, "Algorand address is not valid.");
+  }
+
+  for (const evmAddress of evmAddresses) {
+    let derived: string;
+    try {
+      derived = canonicalAlgorandAddress(await args.derive(evmAddress));
+    } catch {
+      continue;
+    }
+    if (derived === canonical) return canonical;
+  }
+
+  throw new AlgoOnrampBindError(
+    403,
+    "Algorand address does not match this account."
+  );
+}

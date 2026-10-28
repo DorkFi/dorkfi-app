@@ -8,9 +8,18 @@ export type PrivyEasyStartState = {
   evmAddress: string | null;
   algorandAddress: string | null;
   algorandAddressLoading: boolean;
+  /** Set when xChain derivation failed after the EVM wallet existed. */
+  algorandAddressError: string | null;
   displayName: string | null;
   login: ((options?: { loginMethods?: string[] }) => void) | null;
   logout: (() => Promise<void>) | null;
+  /** xChain EIP-712 signing for a full Algorand atomic group. */
+  signAlgorandGroup:
+    | ((
+        txnGroup: import("algosdk").Transaction[],
+        indexesToSign: number[]
+      ) => Promise<Uint8Array[]>)
+    | null;
   /** xChain EIP-712 signing for Algorand txn groups (Dynamic embedded wallet). */
   signTransactions: ((txns: Uint8Array[]) => Promise<Uint8Array[]>) | null;
   /** Dynamic access token for Easy Start APIs (sponsor, offramp). */
@@ -41,9 +50,11 @@ export const DEFAULT_PRIVY_EASY_START_STATE: PrivyEasyStartState = {
   evmAddress: null,
   algorandAddress: null,
   algorandAddressLoading: false,
+  algorandAddressError: null,
   displayName: null,
   login: null,
   logout: null,
+  signAlgorandGroup: null,
   signTransactions: null,
   getAccessToken: null,
   sendTransaction: null,

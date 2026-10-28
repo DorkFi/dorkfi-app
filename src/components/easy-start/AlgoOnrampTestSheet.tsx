@@ -1,10 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  createWaasWalletAccounts,
-  getChainsMissingWaasWalletAccounts,
-} from "@dynamic-labs-sdk/client/waas";
-import { useGetWalletAccounts } from "@dynamic-labs-sdk/react-hooks";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +10,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
-import { deriveAlgorandAddressFromSolana } from "@/lib/easyStart/algorandFromSolana";
 import { fetchAlgorandAlgoTotal } from "@/lib/easyStart/baseBalances";
 import { createCoinbaseSession } from "@/lib/easyStart/offrampApi";
 import { EASY_START_FUNDING_DIALOG_CLASS } from "@/components/easy-start/EasyStartFundingUi";
@@ -44,40 +38,20 @@ function shortAddress(address: string): string {
 }
 
 /**
- * Dev test: Dynamic Solana key → Algorand address → Coinbase ALGO buy.
+ * Dev test: xChain Algorand account → Coinbase ALGO buy.
  * Open any page with `?algoOnramp=1`. Does not replace the Base USDC deposit.
  */
 export function AlgoOnrampTestSheet() {
   const requested = useAlgoOnrampTestRequested();
   const [dismissed, setDismissed] = useState(false);
-  const { authenticated, login, getAccessToken, blockReason } =
+  const { authenticated, login, getAccessToken, blockReason, algorandAddress, algorandAddressLoading, evmAddress } =
     usePrivyEasyStart();
-  const { data: accounts = [] } = useGetWalletAccounts();
-  const [creating, setCreating] = useState(false);
   const [opening, setOpening] = useState<"buy" | "send" | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState("20");
   const [waiting, setWaiting] = useState(false);
   const [baseline, setBaseline] = useState<bigint | null>(null);
-
-  const solanaAccount = useMemo(
-    () => accounts.find((account) => account.chain === "SOL") ?? null,
-    [accounts]
-  );
-  const solanaAddress = solanaAccount?.address ?? null;
-  const algorandAddress = useMemo(() => {
-    if (!solanaAddress) return null;
-    try {
-      return deriveAlgorandAddressFromSolana(solanaAddress);
-    } catch {
-      return null;
-    }
-  }, [solanaAddress]);
-  const deriveError =
-    solanaAddress && !algorandAddress
-      ? "This Solana address could not be turned into an Algorand address."
-      : null;
 
   const balanceQuery = useQuery({
     queryKey: ["algo-onramp-test-balance", algorandAddress],
@@ -92,31 +66,13 @@ export function AlgoOnrampTestSheet() {
     baseline != null &&
     totalMicro >= baseline + ACCOUNT_OPEN_MICRO;
 
-  const prepareWallet = async () => {
-    setError(null);
-    setCreating(true);
-    try {
-      const missing = getChainsMissingWaasWalletAccounts();
-      if (!missing.includes("SOL")) {
-        throw new Error(
-          "Solana embedded wallets are not enabled in this Dynamic environment."
-        );
-      }
-      await createWaasWalletAccounts({ chains: ["SOL"] });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const watchForArrival = () => {
     setBaseline(balanceQuery.data?.totalMicro ?? 0n);
     setWaiting(true);
   };
 
   const openCoinbase = async (experience: "buy" | "send") => {
-    if (!algorandAddress || !solanaAddress || !getAccessToken) return;
+    if (!algorandAddress || !getAccessToken) return;
     setError(null);
     setOpening(experience);
     try {
@@ -125,7 +81,6 @@ export function AlgoOnrampTestSheet() {
       watchForArrival();
       const session = await createCoinbaseSession({
         address: algorandAddress,
-        solanaAddress,
         accessToken,
         amount: experience === "buy" ? amount : undefined,
         destination: "algorand",
@@ -167,7 +122,7 @@ export function AlgoOnrampTestSheet() {
           <DialogHeader className="space-y-2 text-left">
             <DialogTitle>Test ALGO on-ramp</DialogTitle>
             <DialogDescription>
-              Fund an Algorand account derived from a Dynamic Solana wallet.
+              Fund the xChain Algorand account owned by your embedded wallet.
               Buy ALGO, transfer it from Coinbase, or send it from another
               wallet. The Base USDC deposit is unchanged.
             </DialogDescription>
@@ -184,9 +139,9 @@ export function AlgoOnrampTestSheet() {
               {blockReason}
             </p>
           ) : null}
-          {error || deriveError ? (
+          {error ? (
             <p className="text-sm text-destructive" role="alert">
-              {error || deriveError}
+              {error}
             </p>
           ) : null}
 
@@ -194,25 +149,17 @@ export function AlgoOnrampTestSheet() {
             <Button className="w-full" onClick={() => login?.()}>
               Sign in
             </Button>
-          ) : !solanaAddress ? (
-            <Button
-              className="w-full"
-              disabled={creating}
-              onClick={() => void prepareWallet()}
-            >
-              {creating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "Create Algorand wallet"
-              )}
-            </Button>
+          ) : algorandAddressLoading || !algorandAddress ? (
+            <p className="text-sm text-muted-foreground">
+              Preparing your Algorand account…
+            </p>
           ) : (
             <>
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between gap-3">
-                  <dt className="text-muted-foreground">Solana key</dt>
-                  <dd className="font-mono" title={solanaAddress}>
-                    {shortAddress(solanaAddress)}
+                  <dt className="text-muted-foreground">EVM key</dt>
+                  <dd className="font-mono" title={evmAddress ?? ""}>
+                    {evmAddress ? shortAddress(evmAddress) : "—"}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">

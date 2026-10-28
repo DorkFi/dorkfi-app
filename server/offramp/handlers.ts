@@ -24,11 +24,16 @@ import {
 } from "./coinbaseUrls.ts";
 import {
   AlgoOnrampBindError,
-  assertSolanaOwnsAlgorandAddress,
+  assertEvmOwnsXchainAddress,
 } from "../../src/lib/easyStart/algorandFromSolana.ts";
-import { endUserIp, partnerUserRefFromUserId } from "./clientIp.ts";
+import {
+  coinbaseClientIp,
+  isPrivateOrLoopbackIp,
+  partnerUserRefFromUserId,
+} from "./clientIp.ts";
 import { resolveCoinbaseRedirectUrl } from "./redirectUrl.ts";
 import { cdpFailureMessage, parseCdpBody } from "./cdpResponse.ts";
+import { deriveAlgorandXchainAddress } from "../sponsor/chain.ts";
 import {
   assertWalletOwnedByUser,
   fetchPrivyWalletAddresses,
@@ -46,6 +51,8 @@ export type OfframpEnv = {
   privyAppSecret?: string;
   dynamicEnvironmentId?: string;
   redirectUrl?: string;
+  /** Public IP to send Coinbase when the request peer is loopback or private. */
+  cdpClientIp?: string;
 };
 
 export function loadOfframpEnv(
@@ -76,6 +83,7 @@ export function loadOfframpEnv(
       env.OFFRAMP_REDIRECT_URL?.trim() ||
       env.VITE_OFFRAMP_REDIRECT_URL?.trim() ||
       undefined,
+    cdpClientIp: env.CDP_CLIENT_IP?.trim() || undefined,
   };
 }
 
@@ -139,6 +147,8 @@ async function cdpBearer(
     requestHost: CDP_HOST,
     requestPath: path,
     expiresIn: 120,
+    // Onramp rejects JWTs that omit this audience, even with a valid Ed25519 key.
+    audience: ["cdp_service"],
   });
 }
 
@@ -158,7 +168,6 @@ export async function handleCoinbaseSession(
       redirectUrl?: string;
       amount?: string | number;
       destination?: string;
-      solanaAddress?: string;
     };
     const wantsAlgo = body.destination === "algorand";
     let address = body.address?.trim() ?? "";
@@ -172,13 +181,12 @@ export async function handleCoinbaseSession(
         return;
       }
       try {
-        let credentialValues = session.credentialValues;
-        const solanaAddress = body.solanaAddress?.trim() ?? "";
-        if (solanaAddress && !credentialValues.has(solanaAddress)) {
+        let evmAddresses = session.walletAddresses;
+        if (evmAddresses.length === 0) {
           const token = bearerToken(req);
           if (!token || !env.dynamicEnvironmentId) {
             sendJson(res, 403, {
-              error: "Could not confirm the Solana wallet on this session.",
+              error: "Could not confirm the wallet on this session.",
             });
             return;
           }
@@ -186,14 +194,15 @@ export async function handleCoinbaseSession(
             token,
             env.dynamicEnvironmentId
           );
-          credentialValues = new Set([...credentialValues, ...fromProfile]);
+          evmAddresses = [...fromProfile].filter((value) =>
+            /^0x[0-9a-fA-F]{40}$/.test(value)
+          );
         }
-        const bound = assertSolanaOwnsAlgorandAddress({
-          solanaAddress,
+        address = await assertEvmOwnsXchainAddress({
+          evmAddresses,
           algorandAddress: address,
-          credentialValues,
+          derive: deriveAlgorandXchainAddress,
         });
-        address = bound.algorandAddress;
       } catch (error) {
         if (error instanceof AlgoOnrampBindError) {
           sendJson(res, error.status, { error: error.message });
@@ -230,7 +239,17 @@ export async function handleCoinbaseSession(
 
     const path = "/onramp/v1/token";
     const jwt = await cdpBearer(env, "POST", path);
-    const ip = endUserIp(req);
+    const ip = await coinbaseClientIp(req, {
+      override: env.cdpClientIp,
+      allowPublicLookup: process.env.NODE_ENV !== "production",
+    });
+    if (isPrivateOrLoopbackIp(ip)) {
+      sendJson(res, 400, {
+        error:
+          "Coinbase needs a public IP. This request came from a private address, and the public-IP lookup failed. Set CDP_CLIENT_IP to your public IP and retry.",
+      });
+      return;
+    }
 
     const upstream = await fetch(`https://${CDP_HOST}${path}`, {
       method: "POST",

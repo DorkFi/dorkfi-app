@@ -37,11 +37,21 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 // Content: scale-in + fade-in for animation
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    /** Classes for the backdrop. Used to let a wallet prompt sit above the sheet. */
+    overlayClassName?: string;
+    /** Classes for the centering layer that wraps the panel. */
+    layerClassName?: string;
+  }
+>(({ className, children, overlayClassName, layerClassName, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay />
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <DialogOverlay className={overlayClassName} />
+    <div
+      className={cn(
+        "fixed inset-0 z-50 flex items-center justify-center px-4",
+        layerClassName
+      )}
+    >
       <DialogPrimitive.Content
         ref={ref}
         className={cn(

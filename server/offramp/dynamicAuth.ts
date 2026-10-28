@@ -54,7 +54,7 @@ export function collectCredentialValues(value: unknown): Set<string> {
 }
 
 /**
- * Dynamic's access token often omits embedded Solana addresses. The
+ * Dynamic's access token often omits embedded wallet addresses. The
  * authenticated user profile, fetched with that same token, lists them.
  */
 export async function fetchDynamicUserCredentialValues(
@@ -71,7 +71,7 @@ export async function fetchDynamicUserCredentialValues(
   if (!res.ok) {
     throw new AuthError(
       403,
-      "Could not confirm the Solana wallet on this session."
+      "Could not confirm the wallet on this session."
     );
   }
   return collectCredentialValues(await res.json());

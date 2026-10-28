@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import {
+  ArrowLeftRight,
   ChevronDown,
   LogOut,
   Sparkles,
@@ -51,7 +52,7 @@ export function EasyStartButton() {
 
 export function EasyStartConnectMenu() {
   const privy = usePrivyEasyStart();
-  const { openDeposit, openWithdraw } = useEasyStartModals();
+  const { openDeposit, openWithdraw, openSwap } = useEasyStartModals();
   const { formatCurrency } = useNumberI18n();
   const navigate = useNavigate();
   const { displayName, avatar } = useEasyStartUserProfile();
@@ -138,6 +139,10 @@ export function EasyStartConnectMenu() {
         <DropdownMenuItem onClick={openDeposit}>
           <CreditCard className="mr-2 h-4 w-4" />
           Add money
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={openSwap}>
+          <ArrowLeftRight className="mr-2 h-4 w-4" />
+          Swap
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => openWithdraw()}>
           <ArrowDownToLine className="mr-2 h-4 w-4" />

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Transaction } from "algosdk";
+import algosdk from "algosdk";
 import { ArrowDownUp, Check, Loader2 } from "lucide-react";
 import BigNumber from "bignumber.js";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -9,13 +10,15 @@ import {
   type NetworkId,
   type TokenConfig,
 } from "@/config";
-import {
-  createHaystackRouterClient,
-  isHaystackSwapSupported,
-} from "@/services/haystackRouter";
+import { isHaystackSwapSupported } from "@/services/haystackRouter";
+import { executeHaystackSwap } from "@/services/haystackSwapExecute";
 import { useHaystackSwapQuote } from "@/hooks/useHaystackQuote";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { fetchUserWalletBalance } from "@/services/lendingService";
+import { fetchAlgorandSpendableBalance } from "@/lib/easyStart/baseBalances";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
 import { cn, formatUsdAmount } from "@/lib/utils";
 import WalletModal from "@/components/WalletModal";
 import { useToast } from "@/hooks/use-toast";
@@ -101,6 +104,7 @@ function AssetPicker({
   onAmountChange,
   amountReadOnly,
   balance,
+  balanceStatus = "ready",
   showPresets,
   onPreset,
 }: {
@@ -112,6 +116,7 @@ function AssetPicker({
   onAmountChange?: (v: string) => void;
   amountReadOnly?: boolean;
   balance: number | null;
+  balanceStatus?: "loading" | "ready" | "error";
   showPresets?: boolean;
   onPreset?: (fraction: number) => void;
 }) {
@@ -158,9 +163,15 @@ function AssetPicker({
           <div />
           <p className="text-xs text-muted-foreground tabular-nums">
             Balance:{" "}
-            {balance != null
-              ? balance.toLocaleString(undefined, { maximumFractionDigits: 4 })
-              : "0.0000"}
+            {balanceStatus === "loading"
+              ? "Loading…"
+              : balanceStatus === "error"
+                ? "Unavailable"
+                : balance != null
+                  ? balance.toLocaleString(undefined, {
+                      maximumFractionDigits: 4,
+                    })
+                  : "—"}
           </p>
         </div>
         {showPresets && onPreset ? (
@@ -215,13 +226,64 @@ function PriceChip({
   );
 }
 
+async function signIndexedTransactions(
+  txnGroup: Transaction[],
+  indexesToSign: number[],
+  signTransactions: (txns: Uint8Array[]) => Promise<(Uint8Array | null)[]>
+): Promise<Uint8Array[]> {
+  const blobs = indexesToSign.map((index) => {
+    const txn = txnGroup[index];
+    if (!txn) throw new Error(`Missing swap transaction at index ${index}`);
+    return algosdk.encodeUnsignedTransaction(txn);
+  });
+  const signed = await signTransactions(blobs);
+  return signed.map((blob, index) => {
+    if (blob == null) {
+      throw new Error(`Wallet did not sign transaction ${index}`);
+    }
+    return blob;
+  });
+}
+
+export type SwapCardProps = {
+  /** Defaults to the app's selected network. Easy Start passes Algorand mainnet. */
+  networkId?: NetworkId;
+  /**
+   * Easy Start passes the Solana-derived Algorand address. Omit to use the
+   * connected wallet or xChain account from the adapter.
+   */
+  accountAddress?: string | null;
+  /** True while the Easy Start wallet list is still loading. */
+  accountLoading?: boolean;
+  /** Shown on the embedded button when the Algorand account cannot be derived. */
+  accountError?: string | null;
+  /** Render inside a dialog: no outer card chrome, Easy Start button color. */
+  embedded?: boolean;
+  onSignOverlayChange?: (suppressed: boolean) => void;
+  /** True while the wallet prompt is in progress, so the host dialog stays mounted. */
+  onSigningChange?: (signing: boolean) => void;
+  onSwapped?: (txId: string) => void;
+};
+
 /**
  * Simple Haystack-powered swap card — From / To, quote, connect + execute.
  */
-const SwapCard = () => {
+const SwapCard = ({
+  networkId: networkIdProp,
+  accountAddress,
+  accountLoading = false,
+  accountError = null,
+  embedded = false,
+  onSignOverlayChange,
+  onSigningChange,
+  onSwapped,
+}: SwapCardProps) => {
   const { currentNetwork } = useNetwork();
-  const networkId = currentNetwork as NetworkId;
-  const { activeAccount, transactionSigner } = useWallet();
+  const networkId = networkIdProp ?? (currentNetwork as NetworkId);
+  const { activeAccount, activeWallet, signTransactions, transactionSigner, isPrivyEasyStart } =
+    useDorkFiWalletAdapter();
+  const { signAlgorandGroup } = usePrivyEasyStart();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [amountIn, setAmountIn] = useState("");
@@ -232,8 +294,16 @@ const SwapCard = () => {
   const supported = isHaystackSwapSupported(networkId);
 
   const defaultFrom =
-    assets.find((a) => a.symbol === "USDC") ?? assets[0] ?? null;
+    (embedded ? assets.find((a) => a.assetId === 0) : null) ??
+    assets.find((a) => a.symbol === "USDC") ??
+    assets[0] ??
+    null;
   const defaultTo =
+    (embedded
+      ? assets.find(
+          (a) => a.symbol === "USDC" && a.assetId !== defaultFrom?.assetId
+        )
+      : null) ??
     assets.find((a) => a.symbol === "UNIT") ??
     assets.find((a) => a.assetId !== defaultFrom?.assetId) ??
     null;
@@ -248,19 +318,32 @@ const SwapCard = () => {
     assets.find((a) => a.assetId === (toId ?? defaultTo?.assetId)) ??
     defaultTo;
 
+  const swapAddress =
+    accountAddress !== undefined
+      ? accountAddress
+      : (activeAccount?.address ?? null);
+  const useMainnetBalance = networkId === "algorand-mainnet";
+
   const balanceQuery = useQuery({
     queryKey: [
       "swapBalance",
       networkId,
-      activeAccount?.address,
-      fromAsset?.configKey,
+      swapAddress,
+      useMainnetBalance ? fromAsset?.assetId : fromAsset?.configKey,
     ],
-    enabled: Boolean(activeAccount?.address && fromAsset),
-    staleTime: 30_000,
+    enabled: Boolean(swapAddress && fromAsset) && !accountLoading,
+    staleTime: 15_000,
     queryFn: async () => {
-      if (!activeAccount?.address || !fromAsset) return null;
+      if (!swapAddress || !fromAsset) return null;
+      if (useMainnetBalance) {
+        return fetchAlgorandSpendableBalance(
+          swapAddress,
+          fromAsset.assetId,
+          fromAsset.decimals
+        );
+      }
       return fetchUserWalletBalance(
-        activeAccount.address,
+        swapAddress,
         fromAsset.configKey,
         networkId
       );
@@ -268,6 +351,15 @@ const SwapCard = () => {
   });
 
   const balance = balanceQuery.data ?? null;
+  const balanceStatus: "loading" | "ready" | "error" = accountLoading
+    ? "loading"
+    : !swapAddress
+      ? "ready"
+      : balanceQuery.isError
+        ? "error"
+        : balanceQuery.isFetching && balanceQuery.data == null
+          ? "loading"
+          : "ready";
 
   const quote = useHaystackSwapQuote({
     networkId,
@@ -276,6 +368,7 @@ const SwapCard = () => {
     amount: amountIn,
     fromDecimals: fromAsset?.decimals ?? 6,
     toDecimals: toAsset?.decimals ?? 6,
+    address: swapAddress,
     enabled: supported && Boolean(fromAsset && toAsset),
   });
 
@@ -312,7 +405,15 @@ const SwapCard = () => {
 
   const cta = (() => {
     if (!supported) return { label: "Swap unavailable on this network", disabled: true };
-    if (!activeAccount) return { label: "Connect Wallet to Swap", disabled: false };
+    if (accountLoading) return { label: "Loading balance…", disabled: true };
+    if (!swapAddress) {
+      return {
+        label: embedded
+          ? accountError ?? "Algorand account isn’t ready"
+          : "Connect Wallet to Swap",
+        disabled: embedded,
+      };
+    }
     if (!amountIn || parseFloat(amountIn) <= 0)
       return { label: "Enter an amount", disabled: true };
     if (balance != null && parseFloat(amountIn) > balance + 1e-12)
@@ -325,47 +426,74 @@ const SwapCard = () => {
   })();
 
   const onCta = async () => {
-    if (!activeAccount) {
-      setWalletModalOpen(true);
+    if (!swapAddress) {
+      if (!embedded) setWalletModalOpen(true);
       return;
     }
     if (cta.disabled || !quote.quote || !fromAsset || !toAsset) return;
-    if (!transactionSigner) {
+
+    if (embedded && !signAlgorandGroup) {
       toast({
-        title: "Wallet cannot sign",
-        description: "Reconnect your wallet and try again.",
+        title: "Signing isn’t ready",
+        description: "Wait for your account to finish loading, then try again.",
         variant: "destructive",
       });
       return;
     }
+    const signer = embedded
+      ? signAlgorandGroup!
+      : isPrivyEasyStart || !transactionSigner
+        ? (txnGroup: Transaction[], indexesToSign: number[]) =>
+            signIndexedTransactions(txnGroup, indexesToSign, signTransactions)
+        : transactionSigner;
 
     setSwapping(true);
+    onSigningChange?.(true);
     try {
-      const client = createHaystackRouterClient(networkId);
-      if (!client) throw new Error("Haystack Router unavailable");
-      const swap = await client.newSwap({
+      const result = await executeHaystackSwap({
+        address: swapAddress,
         quote: quote.quote,
-        address: activeAccount.address,
-        signer: transactionSigner,
-        slippage,
+        slippagePercent: slippage,
+        transactionSigner: signer,
+        // Leave the Easy Start sheet mounted. Dismissing it for the synthetic
+        // xChain wallet unmounts this card before the EIP-712 prompt appears.
+        activeWallet: embedded ? null : activeWallet,
+        setRainbowkitSuppressed: embedded ? undefined : onSignOverlayChange,
       });
-      const result = await swap.execute();
+      recordAccountActivity({
+        id: result.txId,
+        address: swapAddress,
+        networkId,
+        title: "Swapped",
+        amount: amountIn,
+        symbol: fromAsset.symbol,
+        detail: `to ${toAsset.symbol}`,
+      });
       toast({
         title: "Swap submitted",
-        description: `Confirmed in round ${result.confirmedRound.toString()}`,
+        description: `Transaction ${result.txId.slice(0, 8)}…`,
       });
       setAmountIn("");
+      void queryClient.invalidateQueries({ queryKey: ["swapBalance"] });
+      onSwapped?.(result.txId);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Swap failed";
       toast({ title: "Swap failed", description: msg, variant: "destructive" });
     } finally {
+      onSigningChange?.(false);
       setSwapping(false);
     }
   };
 
   return (
-    <section className="w-full max-w-md mx-auto space-y-4">
-      <div className="rounded-[28px] border border-border/70 bg-card p-5 sm:p-6 shadow-sm space-y-1">
+    <section className={cn("w-full space-y-4", !embedded && "max-w-md mx-auto")}>
+      <div
+        className={cn(
+          "space-y-1",
+          !embedded &&
+            "rounded-[28px] border border-border/70 bg-card p-5 sm:p-6 shadow-sm"
+        )}
+      >
         {!supported ? (
           <p className="mb-4 text-sm text-amber-600 dark:text-amber-400">
             Haystack Router swaps are available on Algorand Mainnet. Switch
@@ -387,6 +515,7 @@ const SwapCard = () => {
             amount={amountIn}
             onAmountChange={setAmountIn}
             balance={balance}
+            balanceStatus={balanceStatus}
             showPresets
             onPreset={applyPreset}
           />
@@ -422,12 +551,16 @@ const SwapCard = () => {
 
         <button
           type="button"
-          disabled={cta.disabled && Boolean(activeAccount)}
-          onClick={onCta}
+          disabled={cta.disabled && (Boolean(swapAddress) || embedded || accountLoading)}
+          onClick={() => void onCta()}
           className={cn(
             "mt-4 w-full rounded-2xl py-4 text-base font-semibold transition-opacity",
-            "bg-whale-gold text-zinc-950 hover:opacity-90",
-            cta.disabled && activeAccount && "opacity-50 cursor-not-allowed"
+            embedded
+              ? "bg-ocean-teal text-white hover:bg-ocean-teal/90"
+              : "bg-whale-gold text-zinc-950 hover:opacity-90",
+            cta.disabled &&
+              (swapAddress || embedded || accountLoading) &&
+              "opacity-50 cursor-not-allowed"
           )}
         >
           {swapping || quote.isLoading ? (
@@ -483,7 +616,7 @@ const SwapCard = () => {
         </div>
       </div>
 
-      {fromAsset && toAsset ? (
+      {!embedded && fromAsset && toAsset ? (
         <div className="grid grid-cols-2 gap-3">
           <PriceChip asset={fromAsset} usdPrice={fromUsd} changePct={0} />
           <PriceChip
@@ -496,10 +629,12 @@ const SwapCard = () => {
         </div>
       ) : null}
 
-      <WalletModal
-        isOpen={walletModalOpen}
-        onClose={() => setWalletModalOpen(false)}
-      />
+      {embedded ? null : (
+        <WalletModal
+          isOpen={walletModalOpen}
+          onClose={() => setWalletModalOpen(false)}
+        />
+      )}
     </section>
   );
 };

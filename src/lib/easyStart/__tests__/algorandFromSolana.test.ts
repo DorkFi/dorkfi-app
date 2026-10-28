@@ -2,6 +2,7 @@ import { encodeAddress } from "algosdk";
 import { describe, expect, it } from "vitest";
 import {
   AlgoOnrampBindError,
+  assertEvmOwnsXchainAddress,
   assertSolanaOwnsAlgorandAddress,
   deriveAlgorandAddressFromSolana,
 } from "@/lib/easyStart/algorandFromSolana";
@@ -50,5 +51,40 @@ describe("assertSolanaOwnsAlgorandAddress", () => {
         credentialValues: new Set([solanaAddress]),
       })
     ).toThrow(/does not match/);
+  });
+});
+
+describe("assertEvmOwnsXchainAddress", () => {
+  const evm = "0x0000000000000000000000000000000000000001";
+  const algorandAddress = encodeAddress(new Uint8Array(32).fill(2));
+
+  it("accepts the address derived from a session EVM wallet", async () => {
+    await expect(
+      assertEvmOwnsXchainAddress({
+        evmAddresses: [evm],
+        algorandAddress,
+        derive: async () => algorandAddress,
+      })
+    ).resolves.toBe(algorandAddress);
+  });
+
+  it("rejects an address from a different account", async () => {
+    await expect(
+      assertEvmOwnsXchainAddress({
+        evmAddresses: [evm],
+        algorandAddress,
+        derive: async () => encodeAddress(new Uint8Array(32).fill(3)),
+      })
+    ).rejects.toThrow(/does not match/);
+  });
+
+  it("rejects a session with no EVM wallet", async () => {
+    await expect(
+      assertEvmOwnsXchainAddress({
+        evmAddresses: [],
+        algorandAddress,
+        derive: async () => algorandAddress,
+      })
+    ).rejects.toThrow(AlgoOnrampBindError);
   });
 });

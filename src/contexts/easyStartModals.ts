@@ -6,6 +6,8 @@ export type EasyStartModalsContextValue = {
   openWithdraw: (launch?: CashOutLaunch | null) => void;
   /** Advanced Base ↔ Algorand USDC move via XO Swap (escape hatch). */
   openBridge: () => void;
+  /** Algorand asset swap via Haystack. */
+  openSwap: () => void;
 };
 
 export const EasyStartModalsContext =
@@ -22,6 +24,9 @@ export function useEasyStartModals(): EasyStartModalsContextValue {
         console.warn("EasyStartModalsProvider is not mounted");
       },
       openBridge: () => {
+        console.warn("EasyStartModalsProvider is not mounted");
+      },
+      openSwap: () => {
         console.warn("EasyStartModalsProvider is not mounted");
       },
     };

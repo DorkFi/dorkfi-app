@@ -1,8 +1,10 @@
 import type { EvmWalletAccount } from "@dynamic-labs-sdk/evm";
 import { createWalletClientForWalletAccount } from "@dynamic-labs-sdk/evm/viem";
 import type { WalletClient } from "viem";
+import type { Transaction } from "algosdk";
 import {
   signPrivyXchainTransactions,
+  signXchainTransactionGroup,
   type PrivySignTypedDataFn,
 } from "@/wallet/privyXchainSignTransactions";
 
@@ -38,6 +40,21 @@ export async function signDynamicXchainTransactions(
   return signPrivyXchainTransactions(
     evmAddress,
     unsignedTxnBlobs,
+    dynamicSignTypedData(getClient)
+  );
+}
+
+/** Haystack signer: full atomic group, one EIP-712 prompt from the EVM wallet. */
+export async function signDynamicXchainGroup(
+  evmAddress: string,
+  txnGroup: Transaction[],
+  indexesToSign: number[],
+  getClient: () => Promise<WalletClient>
+): Promise<Uint8Array[]> {
+  return signXchainTransactionGroup(
+    evmAddress,
+    txnGroup,
+    indexesToSign,
     dynamicSignTypedData(getClient)
   );
 }

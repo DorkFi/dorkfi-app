@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  getWalletAccounts,
   refreshAuth,
-  refreshUser,
 } from "@dynamic-labs-sdk/client";
-import {
-  createWaasWalletAccounts,
-  getChainsMissingWaasWalletAccounts,
-} from "@dynamic-labs-sdk/client/waas";
-import { useGetWalletAccounts } from "@dynamic-labs-sdk/react-hooks";
 import type { Address } from "viem";
 import {
   CheckCircle2,
@@ -24,7 +17,6 @@ import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { dynamicClient } from "@/dynamic/dynamicClient";
-import { deriveAlgorandAddressFromSolana } from "@/lib/easyStart/algorandFromSolana";
 import {
   fetchAlgorandAlgoTotal,
   fetchBaseEthBalance,
@@ -106,7 +98,13 @@ export function EasyStartDepositSheet({
   onBankDepositDetected,
   bankDepositArrived = false,
 }: EasyStartDepositSheetProps) {
-  const { evmAddress, getAccessToken } = usePrivyEasyStart();
+  const {
+    evmAddress,
+    algorandAddress,
+    algorandAddressLoading,
+    algorandAddressError,
+    getAccessToken,
+  } = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
   const { formatCurrency } = useNumberI18n();
   const { toast } = useToast();
@@ -124,26 +122,15 @@ export function EasyStartDepositSheet({
   );
   const [error, setError] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
-  const [openingCrypto, setOpeningCrypto] = useState<"send" | "wallet" | null>(
+  const [openingCrypto, setOpeningCrypto] = useState<"send" | null>(
     null
   );
   const [copiedAlgo, setCopiedAlgo] = useState(false);
   const [algoWaiting, setAlgoWaiting] = useState(false);
   const [algoBaseline, setAlgoBaseline] = useState<bigint | null>(null);
   const [fundedWithAlgo, setFundedWithAlgo] = useState(false);
-  const { data: walletAccounts = [] } = useGetWalletAccounts();
 
   const address = evmAddress as Address | null;
-  const solanaAddress =
-    walletAccounts.find((account) => account.chain === "SOL")?.address ?? null;
-  const algorandAddress = useMemo(() => {
-    if (!solanaAddress) return null;
-    try {
-      return deriveAlgorandAddressFromSolana(solanaAddress);
-    } catch {
-      return null;
-    }
-  }, [solanaAddress]);
   const cryptoMethod = method === "coinbase-send" || method === "external";
   const skipFiat = method === "balance";
   const usdcBeforeRef = useRef(resumeBankDeposit?.usdcBefore ?? 0);
@@ -309,60 +296,12 @@ export function EasyStartDepositSheet({
     noteArrival();
   }, [algoWaiting, bankDepositArrived, baseUsdcNum, noteArrival, phase]);
 
-  const readSolanaAddress = () => {
-    if (solanaAddress) return solanaAddress;
-    const listed = getWalletAccounts().find((account) => account.chain === "SOL")
-      ?.address;
-    if (listed) return listed;
-    const credentials = dynamicClient?.user?.verifiedCredentials;
-    if (!Array.isArray(credentials)) return null;
-    for (const credential of credentials) {
-      if (!credential || typeof credential !== "object") continue;
-      const chain = String(
-        "chain" in credential ? credential.chain ?? "" : ""
-      ).toLowerCase();
-      const address =
-        "address" in credential && typeof credential.address === "string"
-          ? credential.address
-          : "";
-      if ((chain === "solana" || chain === "sol") && address) return address;
-    }
-    return null;
-  };
-
-  const walletFromSolana = (address: string) => ({
-    solanaAddress: address,
-    algorandAddress: deriveAlgorandAddressFromSolana(address),
-  });
-
-  const ensureAlgorandWallet = async () => {
-    const existing = readSolanaAddress();
-    if (existing) return walletFromSolana(existing);
-
-    const missing = getChainsMissingWaasWalletAccounts();
-    if (missing.includes("SOL")) {
-      setOpeningCrypto("wallet");
-      try {
-        await createWaasWalletAccounts({ chains: ["SOL"] });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!/multiple wallets/i.test(message)) throw err;
-      } finally {
-        setOpeningCrypto(null);
-      }
-    }
-
-    try {
-      await refreshUser();
-    } catch {
-      // The wallet may already be in local state.
-    }
-    const refreshed = readSolanaAddress();
-    if (refreshed) return walletFromSolana(refreshed);
+  const ensureAlgorandAddress = async () => {
+    if (algorandAddress) return algorandAddress;
     throw new Error(
-      missing.includes("SOL")
-        ? "Algorand wallet is still loading. Tap the payment button again."
-        : "Solana embedded wallets are not enabled in this Dynamic environment."
+      algorandAddressLoading
+        ? "Algorand account is still loading. Tap the payment button again."
+        : algorandAddressError ?? "Algorand account isn’t ready yet."
     );
   };
 
@@ -386,14 +325,13 @@ export function EasyStartDepositSheet({
       return;
     }
     try {
-      const wallet = await ensureAlgorandWallet();
+      const destination = await ensureAlgorandAddress();
       setPhase("funding");
       const accessToken = await freshAccessToken();
       setAlgoBaseline(algoBalanceQuery.data?.totalMicro ?? 0n);
       setAlgoWaiting(true);
       const session = await createCoinbaseSession({
-        address: wallet.algorandAddress,
-        solanaAddress: wallet.solanaAddress,
+        address: destination,
         accessToken,
         amount,
         destination: "algorand",
@@ -493,14 +431,13 @@ export function EasyStartDepositSheet({
     if (!getAccessToken) return;
     setError(null);
     try {
-      const wallet = await ensureAlgorandWallet();
+      const destination = await ensureAlgorandAddress();
       setOpeningCrypto("send");
       const accessToken = await freshAccessToken();
       setAlgoBaseline(algoBalanceQuery.data?.totalMicro ?? 0n);
       setAlgoWaiting(true);
       const session = await createCoinbaseSession({
-        address: wallet.algorandAddress,
-        solanaAddress: wallet.solanaAddress,
+        address: destination,
         accessToken,
         destination: "algorand",
       });
@@ -519,8 +456,8 @@ export function EasyStartDepositSheet({
   const copyAlgorandAddress = async () => {
     setError(null);
     try {
-      const wallet = await ensureAlgorandWallet();
-      await navigator.clipboard.writeText(wallet.algorandAddress);
+      const destination = await ensureAlgorandAddress();
+      await navigator.clipboard.writeText(destination);
       setCopiedAlgo(true);
       setAlgoBaseline(algoBalanceQuery.data?.totalMicro ?? 0n);
       setAlgoWaiting(true);
@@ -595,11 +532,16 @@ export function EasyStartDepositSheet({
           : `Continue with ${amountDisplay}`;
 
   const busy = phase === "funding" || openingCrypto != null;
+  const needsAlgorandAccount = method === "coinbase" || cryptoMethod;
+  const preparingAlgorand = needsAlgorandAccount && !algorandAddress;
+  const algorandStatus = algorandAddressLoading
+    ? "Preparing your Algorand account…"
+    : algorandAddressError ?? "Algorand account isn’t ready yet.";
   const canContinue =
     method === "coinbase"
-      ? amountValid && !busy
+      ? Boolean(algorandAddress) && amountValid && !busy
       : cryptoMethod
-        ? !busy
+        ? Boolean(algorandAddress) && !busy
         : Boolean(address) && amountValid && !busy;
 
   const goReview = () => {
@@ -806,6 +748,17 @@ export function EasyStartDepositSheet({
                     Waiting for your account…
                   </p>
                 ) : null}
+                {preparingAlgorand ? (
+                  <p
+                    className={`text-sm text-center ${
+                      algorandAddressError
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {algorandStatus}
+                  </p>
+                ) : null}
                 <FundingPrimaryButton
                   disabled={!canContinue}
                   onClick={() => void handleDeposit()}
@@ -900,6 +853,17 @@ export function EasyStartDepositSheet({
                 {method === "balance" && !address ? (
                   <p className="text-sm text-amber-600 dark:text-amber-400">
                     Waiting for your account…
+                  </p>
+                ) : null}
+                {preparingAlgorand ? (
+                  <p
+                    className={`text-sm text-center ${
+                      algorandAddressError
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {algorandStatus}
                   </p>
                 ) : null}
 

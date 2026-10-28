@@ -28,7 +28,7 @@ export function cdpFailureMessage(
     "";
   const text = fromJson.trim();
   if (status === 401 || /^unauthorized$/i.test(text)) {
-    return "Coinbase CDP unauthorized (401). Use a Secret API key (CDP_API_KEY_ID / CDP_API_KEY_SECRET) with Onramp enabled, and keep PEM newlines intact.";
+    return "Coinbase rejected this Secret API key (401). Create a new Secret API key, paste the key ID and the private key from that creation screen into CDP_API_KEY_ID and CDP_API_KEY_SECRET, then restart the dev server. The private key is shown only once.";
   }
   return text || `${fallback} (${status})`;
 }

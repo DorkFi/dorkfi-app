@@ -6,11 +6,12 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
-import { switchActiveNetwork } from "@dynamic-labs-sdk/client";
 import {
-  createWaasWalletAccounts,
-  getChainsMissingWaasWalletAccounts,
-} from "@dynamic-labs-sdk/client/waas";
+  getWalletAccounts,
+  refreshAuth,
+  switchActiveNetwork,
+} from "@dynamic-labs-sdk/client";
+import { createWaasWalletAccounts } from "@dynamic-labs-sdk/client/waas";
 import { isEvmWalletAccount, type EvmWalletAccount } from "@dynamic-labs-sdk/evm";
 import {
   DynamicProvider,
@@ -45,6 +46,7 @@ import {
 } from "@/wallet/dynamicBaseProvider";
 import {
   getDynamicWalletClient,
+  signDynamicXchainGroup,
   signDynamicXchainTransactions,
 } from "@/wallet/dynamicXchainSignTransactions";
 import {
@@ -68,37 +70,56 @@ function displayNameFromUser(
   return user.firstName ?? user.email?.split("@")[0] ?? null;
 }
 
-function WaasBootstrap() {
+function WaasBootstrap({
+  onWalletError,
+}: {
+  onWalletError: (message: string | null) => void;
+}) {
   const { toast } = useToast();
   const { data: user } = useUser();
+  const { data: initStatus } = useInitStatus();
   const creatingRef = useRef(false);
+  const rerunRef = useRef(false);
+  const onWalletErrorRef = useRef(onWalletError);
+  onWalletErrorRef.current = onWalletError;
   const ensureRef = useRef<() => Promise<void>>(async () => {});
 
   ensureRef.current = async () => {
-    if (creatingRef.current) return;
-    let missingChains: ReturnType<typeof getChainsMissingWaasWalletAccounts>;
-    try {
-      missingChains = getChainsMissingWaasWalletAccounts().filter(
-        (chain) => chain === "EVM"
-      );
-    } catch (err) {
-      console.error("[Easy Start] could not check embedded wallets", err);
+    if (initStatus !== "finished") return;
+    if (creatingRef.current) {
+      rerunRef.current = true;
       return;
     }
-    if (missingChains.length === 0) return;
     creatingRef.current = true;
     try {
-      await createWaasWalletAccounts({ chains: missingChains });
-    } catch (err) {
-      console.error("[Easy Start] embedded wallet creation failed", err);
-      toast({
-        title: "Wallet wasn’t created",
-        description:
-          err instanceof Error
-            ? err.message
-            : "Dynamic couldn’t create an embedded wallet. Check that embedded wallets and Base are enabled.",
-        variant: "destructive",
-      });
+      do {
+        rerunRef.current = false;
+        if (getWalletAccounts().some(isEvmWalletAccount)) {
+          onWalletErrorRef.current(null);
+          continue;
+        }
+        onWalletErrorRef.current(null);
+        try {
+          await createWaasWalletAccounts({ chains: ["EVM"] });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (/multiple wallets/i.test(message)) {
+            try {
+              await refreshAuth();
+            } catch {
+              // The existing wallet may already be in local state.
+            }
+            continue;
+          }
+          console.error("[Easy Start] embedded wallet creation failed", err);
+          onWalletErrorRef.current(message);
+          toast({
+            title: "Wallet wasn’t created",
+            description: message,
+            variant: "destructive",
+          });
+        }
+      } while (rerunRef.current);
     } finally {
       creatingRef.current = false;
     }
@@ -113,9 +134,9 @@ function WaasBootstrap() {
   });
 
   useEffect(() => {
-    if (!user) return;
+    if (initStatus !== "finished" || !user) return;
     void ensureRef.current();
-  }, [user]);
+  }, [user, initStatus]);
 
   return null;
 }
@@ -126,6 +147,7 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
   const { data: accounts = [] } = useGetWalletAccounts();
   const logoutMutation = useLogout();
   const [loginOpen, setLoginOpen] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
   useSyncPendingEarnDeposit();
 
   const ready = initStatus === "finished";
@@ -211,6 +233,22 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
     [evmAddress, getWalletClient]
   );
 
+  const signAlgorandGroup = useCallback(
+    async (
+      txnGroup: import("algosdk").Transaction[],
+      indexesToSign: number[]
+    ) => {
+      if (!evmAddress) throw new Error("Easy Start wallet not ready");
+      return signDynamicXchainGroup(
+        evmAddress,
+        txnGroup,
+        indexesToSign,
+        getWalletClient
+      );
+    },
+    [evmAddress, getWalletClient]
+  );
+
   const sendTransaction = useCallback<SendUsdcFn>(
     async (input, options) => {
       if (
@@ -242,7 +280,7 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
   }, [evmAddress, getWalletClient]);
 
   const algorandQuery = useQuery({
-    queryKey: ["dynamic-xchain-address", evmAddress],
+    queryKey: ["dynamic-xchain-address", "nodely", evmAddress],
     queryFn: () => deriveAlgorandXchainAddress(evmAddress!),
     enabled: Boolean(authenticated && evmAddress),
     staleTime: Infinity,
@@ -257,6 +295,15 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
 
   const algorandAddress = authenticated
     ? algorandQuery.data ?? stableAlgorandAddress
+    : null;
+  const deriveError =
+    authenticated && !algorandAddress && algorandQuery.error
+      ? algorandQuery.error instanceof Error
+        ? algorandQuery.error.message
+        : "Could not derive the Algorand account."
+      : null;
+  const algorandAddressError = authenticated
+    ? walletError ?? deriveError
     : null;
 
   const getAccessToken = useCallback(async () => {
@@ -332,10 +379,18 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
       authenticated,
       evmAddress,
       algorandAddress,
-      algorandAddressLoading: algorandQuery.isLoading && !algorandAddress,
+      algorandAddressLoading:
+        authenticated &&
+        !algorandAddress &&
+        !algorandAddressError &&
+        (!evmAddress ||
+          algorandQuery.isPending ||
+          algorandQuery.isFetching),
+      algorandAddressError,
       displayName: displayNameFromUser(user ?? null),
       login,
       logout,
+      signAlgorandGroup: walletReady ? signAlgorandGroup : null,
       signTransactions: walletReady ? signTransactions : null,
       getAccessToken: authenticated ? getAccessToken : null,
       sendTransaction: walletReady ? sendTransaction : null,
@@ -344,7 +399,9 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
     }),
     [
       algorandAddress,
-      algorandQuery.isLoading,
+      algorandAddressError,
+      algorandQuery.isFetching,
+      algorandQuery.isPending,
       authenticated,
       blockReason,
       evmAddress,
@@ -354,6 +411,7 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
       logout,
       ready,
       sendTransaction,
+      signAlgorandGroup,
       signTransactions,
       user,
       walletReady,
@@ -362,7 +420,7 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
 
   return (
     <PrivyEasyStartContext.Provider value={value}>
-      <WaasBootstrap />
+      <WaasBootstrap onWalletError={setWalletError} />
       <EasyStartLoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
       <AlgoOnrampTestSheet />
       {children}

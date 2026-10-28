@@ -15,7 +15,7 @@ describe("cdpFailureMessage", () => {
   it("explains a 401 instead of leaking a JSON parse error", () => {
     const body = parseCdpBody("Unauthorized ");
     expect(cdpFailureMessage(401, body, "Coinbase session failed")).toMatch(
-      /CDP unauthorized \(401\)/
+      /rejected this Secret API key \(401\)/
     );
   });
 

@@ -168,6 +168,50 @@ export async function fetchAlgorandAlgoBalance(address: string): Promise<{
   };
 }
 
+function isAlgodNotFound(error: unknown): boolean {
+  const status =
+    error && typeof error === "object" && "status" in error
+      ? Number((error as { status?: number }).status)
+      : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  return status === 404 || /\b404\b/.test(message);
+}
+
+/**
+ * Spendable balance for a Haystack swap on Algorand mainnet.
+ * ALGO is asset 0 and excludes the minimum balance. A missing account or
+ * an ASA the account has not opted into is 0.
+ */
+export async function fetchAlgorandSpendableBalance(
+  address: string,
+  assetId: number,
+  decimals: number
+): Promise<number> {
+  if (assetId === 0) {
+    try {
+      const balance = await fetchAlgorandAlgoBalance(address);
+      const amount = Number(balance.formatted);
+      return Number.isFinite(amount) ? amount : 0;
+    } catch (error) {
+      if (isAlgodNotFound(error)) return 0;
+      throw error;
+    }
+  }
+
+  try {
+    const info = await ALGORAND_MAINNET_ALGOD.accountAssetInformation(
+      address,
+      assetId
+    ).do();
+    const atomic = getAccountAssetHoldingAmountAtomic(info) ?? 0n;
+    const amount = Number(formatUnits(atomic, decimals));
+    return Number.isFinite(amount) ? amount : 0;
+  } catch (error) {
+    if (isAlgodNotFound(error)) return 0;
+    throw error;
+  }
+}
+
 export function hasEnoughAlgorandAlgo(spendableMicro: bigint): boolean {
   return spendableMicro >= MIN_ALGORAND_ALGO_MICRO;
 }

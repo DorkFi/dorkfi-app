@@ -1,13 +1,12 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
 import BigNumber from "bignumber.js";
 import type { NetworkId } from "@/config";
+import { isHaystackSwapSupported } from "@/services/haystackRouter";
 import {
-  createHaystackRouterClient,
-  isHaystackSwapSupported,
-} from "@/services/haystackRouter";
-import type { SwapQuote } from "@txnlab/haystack-router";
+  fetchHaystackQuote,
+  type HaystackQuoteResponse,
+} from "@/services/haystackRouterService";
 
 export type HaystackQuoteInput = {
   networkId: NetworkId;
@@ -17,11 +16,13 @@ export type HaystackQuoteInput = {
   amount: string;
   fromDecimals: number;
   toDecimals: number;
+  /** Signer address. Included on the quote when the router uses it for opt-in. */
+  address?: string | null;
   enabled?: boolean;
 };
 
 export type HaystackQuoteResult = {
-  quote: SwapQuote | null;
+  quote: HaystackQuoteResponse | null;
   amountOutHuman: string | null;
   usdIn: number | null;
   usdOut: number | null;
@@ -65,8 +66,7 @@ export function formatAtomicToHuman(
 export function useHaystackSwapQuote(
   input: HaystackQuoteInput
 ): HaystackQuoteResult {
-  const { activeAccount } = useWallet();
-  const address = activeAccount?.address;
+  const address = input.address?.trim() || undefined;
   const atomic = toAtomic(input.amount, input.fromDecimals);
   const supported = isHaystackSwapSupported(input.networkId);
   const enabled =
@@ -83,20 +83,27 @@ export function useHaystackSwapQuote(
       input.toAssetId,
       atomic?.toString() ?? "0",
       address ?? "",
+      input.toAssetId !== 0,
     ],
     enabled,
     staleTime: 8_000,
     refetchInterval: enabled ? 20_000 : false,
     queryFn: async () => {
-      const client = createHaystackRouterClient(input.networkId);
-      if (!client || atomic == null) return null;
-      return client.newQuote({
+      if (atomic == null) return null;
+      const quote = await fetchHaystackQuote({
+        chain: "mainnet",
+        type: "fixed-input",
+        amount: atomic,
         fromASAID: input.fromAssetId,
         toASAID: input.toAssetId,
-        amount: atomic,
-        type: "fixed-input",
         address,
+        // Reserve a slot so receiving a new ASA can opt in inside the swap.
+        optIn: input.toAssetId !== 0,
       });
+      if (!quote.txnPayload) {
+        throw new Error("No executable route for this pair");
+      }
+      return quote;
     },
   });
 
@@ -114,7 +121,7 @@ export function useHaystackSwapQuote(
         quote?.userPriceImpact != null && Number.isFinite(quote.userPriceImpact)
           ? quote.userPriceImpact
           : null,
-      isLoading: query.isFetching,
+      isLoading: query.isFetching && query.data == null,
       error: err?.message ?? null,
     };
   }, [query.data, query.error, query.isFetching, input.toDecimals]);

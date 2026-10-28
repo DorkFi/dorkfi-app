@@ -57,6 +57,11 @@ const EasyStartBridgeSheet = lazy(() =>
     default: m.EasyStartBridgeSheet,
   }))
 );
+const EasyStartSwapSheet = lazy(() =>
+  import("@/components/easy-start/EasyStartSwapSheet").then((m) => ({
+    default: m.EasyStartSwapSheet,
+  }))
+);
 
 const SHEET_FALLBACK_CLASS =
   "bg-background text-foreground rounded-2xl border border-border/60 shadow-xl max-w-[95vw] md:max-w-md p-0";
@@ -137,6 +142,7 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
     null
   );
   const [bridgeOpen, setBridgeOpen] = useState(false);
+  const [swapOpen, setSwapOpen] = useState(false);
   const [offrampResume, setOfframpResume] =
     useState<CoinbaseOfframpPending | null>(null);
   const [bankResume, setBankResume] = useState<PendingBankDeposit | null>(null);
@@ -188,6 +194,7 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
     setWithdrawOpen(true);
   }, []);
   const openBridge = useCallback(() => setBridgeOpen(true), []);
+  const openSwap = useCallback(() => setSwapOpen(true), []);
 
   useEffect(() => {
     const pending = consumeCoinbaseOfframpReturn();
@@ -199,8 +206,9 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
       openDeposit,
       openWithdraw,
       openBridge,
+      openSwap,
     }),
-    [openDeposit, openWithdraw, openBridge]
+    [openDeposit, openWithdraw, openBridge, openSwap]
   );
 
   useEffect(() => {
@@ -291,6 +299,35 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                   onOpenAdvancedBridge={
                     consumerCopy ? undefined : openAdvancedBridge
                   }
+                />
+              </Suspense>
+            </IsolateErrorBoundary>
+          ) : null}
+          {swapOpen ? (
+            <IsolateErrorBoundary
+              label="Swap"
+              fallback={({ error, retry }) => (
+                <EasyStartSheetError
+                  open={swapOpen}
+                  onOpenChange={setSwapOpen}
+                  title="Swap"
+                  error={error}
+                  retry={retry}
+                />
+              )}
+            >
+              <Suspense
+                fallback={
+                  <EasyStartSheetFallback
+                    open={swapOpen}
+                    onOpenChange={setSwapOpen}
+                    title="Swap"
+                  />
+                }
+              >
+                <EasyStartSwapSheet
+                  open={swapOpen}
+                  onOpenChange={setSwapOpen}
                 />
               </Suspense>
             </IsolateErrorBoundary>

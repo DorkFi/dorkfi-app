@@ -141,6 +141,8 @@ export type FetchHaystackQuoteParams = {
   maxDepth?: number;
   disabledProtocols?: string[];
   optIn?: boolean;
+  /** Account that will sign. Used with opt-in routing. */
+  address?: string;
   algodUri?: string;
   algodToken?: string;
   algodPort?: string | number;
@@ -168,6 +170,7 @@ export async function fetchHaystackQuote(
   if (params.optIn != null) {
     search.set("optIn", String(params.optIn));
   }
+  if (params.address) search.set("address", params.address);
   if (params.algodUri) search.set("algodUri", params.algodUri);
   if (params.algodToken != null) search.set("algodToken", params.algodToken);
   if (params.algodPort != null) search.set("algodPort", String(params.algodPort));
