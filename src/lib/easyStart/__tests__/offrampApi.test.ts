@@ -50,6 +50,19 @@ describe("coinbaseSellAmount / coinbaseDepositAddress", () => {
     );
   });
 
+  it("accepts an Algorand deposit address for an ALGO sell", () => {
+    const tx: CoinbaseSellTx = {
+      sell_amount: { value: "10", currency: "ALGO" },
+      to_address: "47YPQTIGQEO7T4Y4RWDYWEKV6RTR2UNBQXBABEEGM72ESWDQNCQ52OPASU",
+      asset: "ALGO",
+      network: "algorand",
+    };
+    expect(coinbaseDepositAddress(tx, "algorand")).toBe(
+      "47YPQTIGQEO7T4Y4RWDYWEKV6RTR2UNBQXBABEEGM72ESWDQNCQ52OPASU"
+    );
+    expect(coinbaseDepositAddress(tx)).toBeNull();
+  });
+
   it("returns null when the transaction is missing", () => {
     expect(coinbaseSellAmount(null)).toBeNull();
     expect(coinbaseDepositAddress(null)).toBeNull();

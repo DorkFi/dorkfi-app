@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
+  COINBASE_ALGORAND_ALGO,
+  coinbaseSessionTokenBody,
   parseCoinbaseOfframpReturnSearch,
   withCoinbaseOfframpReturnQuery,
 } from "./coinbaseUrls";
@@ -30,6 +32,31 @@ describe("buildCoinbaseOnrampBuyUrl", () => {
       "https://beta.simplfi.xyz/portfolio"
     );
   });
+
+  it("builds an Algorand ALGO buy for the xChain account", () => {
+    const url = new URL(
+      buildCoinbaseOnrampBuyUrl(args, COINBASE_ALGORAND_ALGO)
+    );
+    expect(url.searchParams.get("defaultNetwork")).toBe("algorand");
+    expect(url.searchParams.get("defaultAsset")).toBe("ALGO");
+    expect(url.searchParams.get("defaultExperience")).toBe("buy");
+    expect(
+      coinbaseSessionTokenBody({
+        address: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        clientIp: "203.0.113.8",
+        target: COINBASE_ALGORAND_ALGO,
+      })
+    ).toEqual({
+      addresses: [
+        {
+          address: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          blockchains: ["algorand"],
+        },
+      ],
+      clientIp: "203.0.113.8",
+      assets: ["ALGO"],
+    });
+  });
 });
 
 describe("buildCoinbaseOfframpSellUrl", () => {
@@ -38,8 +65,28 @@ describe("buildCoinbaseOfframpSellUrl", () => {
     expect(url.origin + url.pathname).toBe(
       "https://pay.coinbase.com/v3/sell/input"
     );
+    expect(url.searchParams.get("defaultNetwork")).toBe("base");
+    expect(url.searchParams.get("defaultAsset")).toBe("USDC");
     expect(url.searchParams.get("presetCryptoAmount")).toBe("100");
     expect(url.searchParams.get("presetFiatAmount")).toBeNull();
+    expect(url.searchParams.get("defaultCashoutMethod")).toBeNull();
+  });
+
+  it("sells Algorand ALGO to a bank or a Coinbase account", () => {
+    const bank = new URL(
+      buildCoinbaseOfframpSellUrl(args, COINBASE_ALGORAND_ALGO, "ACH_BANK_ACCOUNT")
+    );
+    expect(bank.searchParams.get("defaultNetwork")).toBe("algorand");
+    expect(bank.searchParams.get("defaultAsset")).toBe("ALGO");
+    expect(bank.searchParams.get("defaultCashoutMethod")).toBe("ACH_BANK_ACCOUNT");
+    expect(bank.searchParams.get("presetCryptoAmount")).toBe("100");
+
+    const coinbase = new URL(
+      buildCoinbaseOfframpSellUrl(args, COINBASE_ALGORAND_ALGO, "CRYPTO_ACCOUNT")
+    );
+    expect(coinbase.searchParams.get("defaultCashoutMethod")).toBe(
+      "CRYPTO_ACCOUNT"
+    );
   });
 
   it("sends cash-out back to /portfolio with resume query params", () => {

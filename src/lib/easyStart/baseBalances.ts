@@ -119,6 +119,33 @@ export function hasEnoughBaseEth(balanceWei: bigint): boolean {
 /** ~enough for USDC opt-in / send fees + MBR cushion (microAlgos). */
 export const MIN_ALGORAND_ALGO_MICRO = 100_000n; // 0.1 ALGO
 
+export async function fetchAlgorandAlgoTotal(address: string): Promise<{
+  exists: boolean;
+  totalMicro: bigint;
+  formatted: string;
+}> {
+  try {
+    const info = await ALGORAND_MAINNET_ALGOD.accountInformation(address).do();
+    const raw = info.amount;
+    const totalMicro = typeof raw === "bigint" ? raw : BigInt(raw ?? 0);
+    return {
+      exists: true,
+      totalMicro,
+      formatted: formatUnits(totalMicro, 6),
+    };
+  } catch (error) {
+    const status =
+      error && typeof error === "object" && "status" in error
+        ? Number((error as { status?: number }).status)
+        : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    if (status === 404 || message.includes("404")) {
+      return { exists: false, totalMicro: 0n, formatted: "0" };
+    }
+    throw error;
+  }
+}
+
 export async function fetchAlgorandAlgoBalance(address: string): Promise<{
   valueMicro: bigint;
   formatted: string;

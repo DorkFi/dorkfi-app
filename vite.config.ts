@@ -29,6 +29,7 @@ export default defineConfig(({ mode }) => {
     "PRIVY_APP_ID",
     "VITE_PRIVY_APP_ID",
     "PRIVY_APP_SECRET",
+    "CDP_CLIENT_IP",
     "VITE_OFFRAMP_REDIRECT_URL",
     "OFFRAMP_REDIRECT_URL",
     "SPONSOR_ENABLED",

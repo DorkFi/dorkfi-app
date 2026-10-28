@@ -4,7 +4,7 @@ Optional email / social onboarding path for **Algorand Mainnet only**. Existing 
 
 ## User flow
 
-1. **Get Started** → Privy login (email, Google, Apple, passkey)
+1. **Get Started** → Privy login (email, phone for US and Canada, Google, passkey)
 2. Embedded EVM wallet created on **Base**
 3. **Deposit** → one sheet: amount → Coinbase Onramp / Apple Pay / card → (ETH gas top-up if needed) → Deposit to Earn (XO Swap + supply)
 4. Algorand xChain address derived from EVM wallet → DorkFi markets (supply signing: Phase 5)

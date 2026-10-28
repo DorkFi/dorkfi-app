@@ -18,7 +18,11 @@ import { useQuery } from "@tanstack/react-query";
 import { base } from "viem/chains";
 import { isFeatureEnabled } from "@/config";
 import { deriveAlgorandXchainAddress } from "@/services/xchainAddressService";
-import { signPrivyXchainTransactions } from "@/wallet/privyXchainSignTransactions";
+import {
+  signPrivyXchainTransactions,
+  signXchainTransactionGroup,
+} from "@/wallet/privyXchainSignTransactions";
+import type { Transaction } from "algosdk";
 import {
   getPrivyAppId,
   getPrivyOriginHint,
@@ -156,6 +160,21 @@ function PrivyEasyStartStateBridge({
     [evmAddress, signTypedData]
   );
 
+  const signTransactionGroup = useCallback(
+    async (txnGroup: Transaction[], indexesToSign: number[]) => {
+      if (!evmAddress) {
+        throw new Error("Easy Start wallet not ready");
+      }
+      return signXchainTransactionGroup(
+        evmAddress,
+        txnGroup,
+        indexesToSign,
+        signTypedData
+      );
+    },
+    [evmAddress, signTypedData]
+  );
+
   const algorandQuery = useQuery({
     queryKey: ["privy-xchain-address", evmAddress],
     queryFn: () => deriveAlgorandXchainAddress(evmAddress!),
@@ -232,6 +251,8 @@ function PrivyEasyStartStateBridge({
       login,
       logout,
       signTransactions: authenticated && evmAddress ? signTransactions : null,
+      signTransactionGroup:
+        authenticated && evmAddress ? signTransactionGroup : null,
       getAccessToken: authenticated ? getAccessToken : null,
       blockReason: privyError ? privyError.message : null,
     }),
@@ -245,6 +266,7 @@ function PrivyEasyStartStateBridge({
       logout,
       privyError,
       ready,
+      signTransactionGroup,
       signTransactions,
       user,
     ]
@@ -367,10 +389,15 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
         key={providerKey}
         appId={PRIVY_APP_ID}
         config={{
-          loginMethods: ["email", "google", "apple", "passkey"],
+          loginMethods: ["email", "sms", "google", "passkey"],
           appearance: {
             theme: "dark",
             accentColor: "#2d8b78",
+          },
+          // Phone sign-up. Privy’s dashboard “US and Canada only” SMS setting
+          // is what rejects numbers outside those countries.
+          intl: {
+            defaultCountry: "US",
           },
           embeddedWallets: {
             ethereum: {

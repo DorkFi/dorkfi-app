@@ -1,5 +1,5 @@
 import { AlgorandClient } from "@algorandfoundation/algokit-utils/types/algorand-client";
-import algosdk from "algosdk";
+import algosdk, { type Transaction } from "algosdk";
 import {
   AlgoXEvmSdk,
   type SignTypedDataParams as AlgoXSignTypedDataParams,
@@ -41,21 +41,45 @@ export async function signPrivyXchainTransactions(
   return getSdk().signTxn({
     evmAddress,
     txns,
-    signMessage: async (typedData: AlgoXSignTypedDataParams) => {
-      const { signature } = await signTypedData(
-        {
-          ...typedData,
-          types: {
-            ...typedData.types,
-            EIP712Domain: [...typedData.types.EIP712Domain],
-            "Algorand Transaction": [
-              ...typedData.types["Algorand Transaction"],
-            ],
-          },
-        },
-        { address: evmAddress }
-      );
-      return signature;
-    },
+    signMessage: (typedData) =>
+      signTypedDataForXchain(evmAddress, typedData, signTypedData),
   });
+}
+
+/**
+ * Sign a Haystack group with the embedded EVM wallet.
+ * The EIP-712 payload is the atomic group id when the group has more than one
+ * transaction. Callers must pass the full group, not a sliced subset.
+ */
+export async function signXchainTransactionGroup(
+  evmAddress: string,
+  txnGroup: Transaction[],
+  indexesToSign: number[],
+  signTypedData: PrivySignTypedDataFn
+): Promise<(Uint8Array | null)[]> {
+  const { signer } = await getSdk().getSigner({
+    evmAddress,
+    signMessage: (typedData) =>
+      signTypedDataForXchain(evmAddress, typedData, signTypedData),
+  });
+  return signer(txnGroup, indexesToSign);
+}
+
+async function signTypedDataForXchain(
+  evmAddress: string,
+  typedData: AlgoXSignTypedDataParams,
+  signTypedData: PrivySignTypedDataFn
+): Promise<string> {
+  const { signature } = await signTypedData(
+    {
+      ...typedData,
+      types: {
+        ...typedData.types,
+        EIP712Domain: [...typedData.types.EIP712Domain],
+        "Algorand Transaction": [...typedData.types["Algorand Transaction"]],
+      },
+    },
+    { address: evmAddress }
+  );
+  return signature;
 }

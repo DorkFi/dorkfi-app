@@ -72,11 +72,12 @@ function App() {
       <NetworkProvider>
       {/* Locale outside Easy Start modals so deposit/withdraw sheets can use useNumberI18n */}
       <LocaleSettingsProvider>
+      {/* Router above the sheets so Link / useNavigate work inside the dialogs. */}
+      <BrowserRouter>
       <EasyStartModalsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
             <AppErrorBoundary label="Page">
             <Routes>
               <Route
@@ -182,9 +183,9 @@ function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             </AppErrorBoundary>
-          </BrowserRouter>
         </TooltipProvider>
       </EasyStartModalsProvider>
+      </BrowserRouter>
       </LocaleSettingsProvider>
       </NetworkProvider>
       </PrivySessionProvider>

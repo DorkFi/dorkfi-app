@@ -21,6 +21,9 @@ type EasyStartOfframpCashOutSlotProps = {
   resumePartnerUserRef?: string | null;
   resumeSendTxHash?: string | null;
   onResumeConsumed?: () => void;
+  asset?: "USDC" | "ALGO";
+  algorandAddress?: string | null;
+  cashoutMethod?: "ACH_BANK_ACCOUNT" | "CRYPTO_ACCOUNT";
 };
 
 /**

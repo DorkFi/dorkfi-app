@@ -13,9 +13,19 @@ import { AuthError, requirePrivyAuth } from "./privyAuth.js";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
+  COINBASE_ALGORAND_ALGO,
+  COINBASE_BASE_USDC,
+  coinbaseSessionTokenBody,
+  parseCoinbaseCashoutMethod,
+  type CoinbaseAssetTarget,
   withCoinbaseOfframpReturnQuery,
 } from "./coinbaseUrls.ts";
-import { endUserIp, partnerUserRefFromUserId } from "./clientIp.ts";
+import { assertPrivyOwnsXchainAddress } from "./xchainBind.ts";
+import {
+  coinbaseClientIp,
+  isPrivateOrLoopbackIp,
+  partnerUserRefFromUserId,
+} from "./clientIp.ts";
 import { resolveCoinbaseRedirectUrl } from "./redirectUrl.ts";
 import { cdpFailureMessage, parseCdpBody } from "./cdpResponse.ts";
 import {
@@ -34,6 +44,8 @@ export type OfframpEnv = {
   privyAppId?: string;
   privyAppSecret?: string;
   redirectUrl?: string;
+  /** Public IP to send Coinbase when the request peer is loopback or private. */
+  cdpClientIp?: string;
 };
 
 export function loadOfframpEnv(
@@ -60,6 +72,7 @@ export function loadOfframpEnv(
       env.OFFRAMP_REDIRECT_URL?.trim() ||
       env.VITE_OFFRAMP_REDIRECT_URL?.trim() ||
       undefined,
+    cdpClientIp: env.CDP_CLIENT_IP?.trim() || undefined,
   };
 }
 
@@ -134,12 +147,17 @@ export async function handleCoinbaseSession(
       address?: string;
       redirectUrl?: string;
       amount?: string | number;
+      destination?: string;
+      cashoutMethod?: string;
     };
-    const address = body.address?.trim();
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      sendJson(res, 400, { error: "Valid Base wallet address required" });
+    const wantsAlgo = body.destination === "algorand";
+    const cashoutMethod = parseCoinbaseCashoutMethod(body.cashoutMethod);
+    if (body.cashoutMethod != null && body.cashoutMethod !== "" && !cashoutMethod) {
+      sendJson(res, 400, { error: "Unsupported Coinbase cash-out method" });
       return;
     }
+    let address = body.address?.trim() ?? "";
+    let target: CoinbaseAssetTarget = COINBASE_BASE_USDC;
 
     if (!env.privyAppSecret) {
       sendJson(res, 503, {
@@ -153,11 +171,31 @@ export async function handleCoinbaseSession(
       privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
       privyAppSecret: env.privyAppSecret,
     });
-    assertWalletOwnedByUser(address, owned);
+
+    if (wantsAlgo) {
+      await assertPrivyOwnsXchainAddress(owned, address);
+      target = COINBASE_ALGORAND_ALGO;
+    } else {
+      if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        sendJson(res, 400, { error: "Valid Base wallet address required" });
+        return;
+      }
+      assertWalletOwnedByUser(address, owned);
+    }
 
     const path = "/onramp/v1/token";
     const jwt = await cdpBearer(env, "POST", path);
-    const ip = endUserIp(req);
+    const ip = await coinbaseClientIp(req, {
+      override: env.cdpClientIp,
+      allowPublicLookup: process.env.NODE_ENV !== "production",
+    });
+    if (isPrivateOrLoopbackIp(ip)) {
+      sendJson(res, 400, {
+        error:
+          "Coinbase needs a public IP. This request came from a private address, and the public-IP lookup failed. Set CDP_CLIENT_IP to your public IP and retry.",
+      });
+      return;
+    }
 
     const upstream = await fetch(`https://${CDP_HOST}${path}`, {
       method: "POST",
@@ -165,11 +203,9 @@ export async function handleCoinbaseSession(
         Authorization: `Bearer ${jwt}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        addresses: [{ address, blockchains: ["base"] }],
-        clientIp: ip,
-        assets: ["USDC"],
-      }),
+      body: JSON.stringify(
+        coinbaseSessionTokenBody({ address, clientIp: ip, target })
+      ),
     });
 
     const data = parseCdpBody(await upstream.text());
@@ -199,14 +235,18 @@ export async function handleCoinbaseSession(
     sendJson(res, 200, {
       sessionToken: data.token,
       partnerUserRef,
-      buyUrl: buildCoinbaseOnrampBuyUrl(widgetArgs),
-      sellUrl: buildCoinbaseOfframpSellUrl({
-        ...widgetArgs,
-        redirectUrl: withCoinbaseOfframpReturnQuery(
-          redirectUrl,
-          partnerUserRef
-        ),
-      }),
+      buyUrl: buildCoinbaseOnrampBuyUrl(widgetArgs, target),
+      sellUrl: buildCoinbaseOfframpSellUrl(
+        {
+          ...widgetArgs,
+          redirectUrl: withCoinbaseOfframpReturnQuery(
+            redirectUrl,
+            partnerUserRef
+          ),
+        },
+        cashoutMethod && wantsAlgo ? COINBASE_ALGORAND_ALGO : COINBASE_BASE_USDC,
+        cashoutMethod
+      ),
     });
   } catch (e: unknown) {
     if (e instanceof AuthError) {

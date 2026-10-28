@@ -1,4 +1,4 @@
-/** Client helpers for Easy Start Coinbase + MoonPay off-ramp. */
+import { decodeAddress } from "algosdk";
 
 export type OfframpHealth = {
   ok: boolean;
@@ -82,6 +82,10 @@ export async function createCoinbaseSession(args: {
   accessToken: string;
   amount?: string;
   redirectUrl?: string;
+  /** `algorand` buys or sells ALGO on the xChain account. Omitted keeps Base USDC. */
+  destination?: "base" | "algorand";
+  /** Bank ACH or the user's Coinbase crypto balance. Used with an ALGO sell. */
+  cashoutMethod?: "ACH_BANK_ACCOUNT" | "CRYPTO_ACCOUNT";
 }): Promise<CoinbaseSessionResult> {
   const res = await fetch(`${offrampBase()}/coinbase/session`, {
     method: "POST",
@@ -89,6 +93,8 @@ export async function createCoinbaseSession(args: {
     body: JSON.stringify({
       address: args.address,
       amount: args.amount,
+      destination: args.destination,
+      cashoutMethod: args.cashoutMethod,
       redirectUrl:
         args.redirectUrl ||
         import.meta.env.VITE_OFFRAMP_REDIRECT_URL ||
@@ -125,10 +131,27 @@ export async function signMoonpayWidgetUrl(
   return data.signature;
 }
 
-export function coinbaseDepositAddress(tx: CoinbaseSellTx | null): string | null {
+function isAlgorandAddress(address: string): boolean {
+  try {
+    decodeAddress(address);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function coinbaseDepositAddress(
+  tx: CoinbaseSellTx | null,
+  kind: "evm" | "algorand" = "evm"
+): string | null {
   if (!tx) return null;
   const addr = tx.to_address || tx.toAddress;
-  return typeof addr === "string" && addr.startsWith("0x") ? addr : null;
+  if (typeof addr !== "string") return null;
+  const trimmed = addr.trim();
+  if (kind === "algorand") {
+    return isAlgorandAddress(trimmed) ? trimmed : null;
+  }
+  return trimmed.startsWith("0x") ? trimmed : null;
 }
 
 /** CDP returns `{ value, currency }` in live payloads; older docs called it a string. */

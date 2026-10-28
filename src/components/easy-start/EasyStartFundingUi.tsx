@@ -86,11 +86,13 @@ export function AmountPresets({
   value,
   onChange,
   disabledAmount,
+  prefix = "$",
 }: {
   amounts: readonly string[];
   value: string;
   onChange: (amount: string) => void;
   disabledAmount?: (amount: string) => boolean;
+  prefix?: string;
 }) {
   return (
     <div className="grid grid-cols-4 gap-2">
@@ -110,7 +112,8 @@ export function AmountPresets({
                 : "border-border bg-background hover:bg-muted/50 text-foreground"
             )}
           >
-            ${preset}
+            {prefix}
+            {preset}
           </button>
         );
       })}
@@ -127,6 +130,8 @@ export function AmountHero({
   display,
   min = 1,
   step = 1,
+  prefix = "$",
+  suffix,
 }: {
   id: string;
   amount: string;
@@ -136,6 +141,8 @@ export function AmountHero({
   display: string;
   min?: number;
   step?: number;
+  prefix?: string;
+  suffix?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -146,9 +153,11 @@ export function AmountHero({
   if (editing) {
     return (
       <div className="relative rounded-xl border border-ocean-teal bg-background px-4 py-3">
-        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-bold text-foreground">
-          $
-        </span>
+        {prefix ? (
+          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-bold text-foreground">
+            {prefix}
+          </span>
+        ) : null}
         <input
           ref={inputRef}
           id={id}
@@ -158,8 +167,16 @@ export function AmountHero({
           value={amount}
           onChange={(e) => onChange(e.target.value)}
           onBlur={() => onEditingChange(false)}
-          className="w-full bg-transparent pl-7 pr-10 text-center text-3xl font-bold tabular-nums text-foreground focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className={cn(
+            "w-full bg-transparent pr-16 text-center text-3xl font-bold tabular-nums text-foreground focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+            prefix ? "pl-7" : "pl-2"
+          )}
         />
+        {suffix ? (
+          <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+            {suffix}
+          </span>
+        ) : null}
       </div>
     );
   }

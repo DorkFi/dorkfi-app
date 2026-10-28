@@ -8,10 +8,16 @@ export const CB_OFFRAMP_REF_QUERY = "ref";
 export const CB_OFFRAMP_PENDING_KEY = "simplfi.cb_offramp.pending";
 const MAX_AGE_MS = 30 * 60 * 1000;
 
+export type CoinbaseOfframpAsset = "ALGO" | "USDC";
+export type CoinbaseOfframpCashoutMethod = "ACH_BANK_ACCOUNT" | "CRYPTO_ACCOUNT";
+
 export type CoinbaseOfframpPending = {
   partnerUserRef: string;
   amount: string | null;
   sendTxHash?: string | null;
+  /** Missing means an in-flight Base USDC cash-out from before ALGO sells. */
+  asset?: CoinbaseOfframpAsset;
+  cashoutMethod?: CoinbaseOfframpCashoutMethod;
   at: number;
 };
 
@@ -57,6 +63,18 @@ function isFreshPending(value: unknown): value is CoinbaseOfframpPending {
   return true;
 }
 
+function readAsset(value: unknown): CoinbaseOfframpAsset | undefined {
+  return value === "ALGO" || value === "USDC" ? value : undefined;
+}
+
+function readCashoutMethod(
+  value: unknown
+): CoinbaseOfframpCashoutMethod | undefined {
+  return value === "ACH_BANK_ACCOUNT" || value === "CRYPTO_ACCOUNT"
+    ? value
+    : undefined;
+}
+
 export function saveCoinbaseOfframpPending(
   pending: Omit<CoinbaseOfframpPending, "at"> & { at?: number }
 ): CoinbaseOfframpPending {
@@ -64,6 +82,8 @@ export function saveCoinbaseOfframpPending(
     partnerUserRef: pending.partnerUserRef,
     amount: pending.amount ?? null,
     sendTxHash: pending.sendTxHash ?? null,
+    asset: readAsset(pending.asset),
+    cashoutMethod: readCashoutMethod(pending.cashoutMethod),
     at: pending.at ?? Date.now(),
   };
   getSessionStorage()?.setItem(CB_OFFRAMP_PENDING_KEY, JSON.stringify(next));
@@ -84,6 +104,8 @@ export function readCoinbaseOfframpPending(): CoinbaseOfframpPending | null {
       amount: typeof parsed.amount === "string" ? parsed.amount : null,
       sendTxHash:
         typeof parsed.sendTxHash === "string" ? parsed.sendTxHash : null,
+      asset: readAsset(parsed.asset),
+      cashoutMethod: readCashoutMethod(parsed.cashoutMethod),
       at: parsed.at,
     };
   } catch {
@@ -147,6 +169,8 @@ export function consumeCoinbaseOfframpReturn(opts?: {
     partnerUserRef,
     amount: stored?.amount ?? null,
     sendTxHash: stored?.sendTxHash ?? null,
+    asset: stored?.asset,
+    cashoutMethod: stored?.cashoutMethod,
     at: stored?.at,
   });
 }

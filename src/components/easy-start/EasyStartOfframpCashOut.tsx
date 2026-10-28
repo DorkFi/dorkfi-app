@@ -25,6 +25,8 @@ import {
   type OfframpHealth,
 } from "@/lib/easyStart/offrampApi";
 import { sendBaseUsdc } from "@/lib/easyStart/sendBaseUsdc";
+import { sendAlgorandAlgo } from "@/lib/easyStart/sendAlgorandAlgo";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import {
   fetchBaseEthBalance,
   hasEnoughBaseEth,
@@ -66,6 +68,10 @@ interface EasyStartOfframpCashOutProps {
   resumePartnerUserRef?: string | null;
   resumeSendTxHash?: string | null;
   onResumeConsumed?: () => void;
+  /** ALGO sells from the xChain account. Omitted keeps the Base USDC send. */
+  asset?: "USDC" | "ALGO";
+  algorandAddress?: string | null;
+  cashoutMethod?: "ACH_BANK_ACCOUNT" | "CRYPTO_ACCOUNT";
 }
 
 function isUserCanceledFunding(message: string): boolean {
@@ -98,10 +104,14 @@ export function EasyStartOfframpCashOut({
   resumePartnerUserRef = null,
   resumeSendTxHash = null,
   onResumeConsumed,
+  asset = "USDC",
+  algorandAddress = null,
+  cashoutMethod,
 }: EasyStartOfframpCashOutProps) {
   const { sendTransaction } = useSendTransaction();
   const { fundWallet } = useFundWallet();
   const { getAccessToken } = usePrivy();
+  const { signTransactions } = usePrivyEasyStart();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
 
@@ -175,12 +185,41 @@ export function EasyStartOfframpCashOut({
     [evmAddress, sendTransaction, toast]
   );
 
+  const sendAlgoTo = useCallback(
+    async (to: string, cryptoAmount: string) => {
+      if (!signTransactions || !algorandAddress) {
+        throw new Error("Algorand wallet isn’t ready to sign.");
+      }
+      setPhase("sending");
+      const txId = await sendAlgorandAlgo({
+        from: algorandAddress,
+        to,
+        amount: cryptoAmount,
+        signTransactions,
+      });
+      setTxHash(txId);
+      patchCoinbaseOfframpPending({ sendTxHash: txId });
+      setPhase("done");
+      toast({
+        title: "Sent",
+        description: "Your ALGO cash-out is processing with Coinbase.",
+      });
+      return txId;
+    },
+    [algorandAddress, signTransactions, toast]
+  );
+
   useEffect(() => {
     if (provider !== "coinbase" || !resumePartnerUserRef) return;
     if (resumeSendTxHash) {
       setPartnerUserRef(resumePartnerUserRef);
       setTxHash(resumeSendTxHash);
       setPhase("done");
+      return;
+    }
+    if (asset === "ALGO") {
+      setPartnerUserRef(resumePartnerUserRef);
+      setPhase("awaiting_provider");
       return;
     }
     let cancelled = false;
@@ -200,7 +239,7 @@ export function EasyStartOfframpCashOut({
     return () => {
       cancelled = true;
     };
-  }, [provider, resumePartnerUserRef, resumeSendTxHash, walletHasGas]);
+  }, [asset, provider, resumePartnerUserRef, resumeSendTxHash, walletHasGas]);
 
   const finishCashOut = useCallback(() => {
     clearCoinbaseOfframpPending();
@@ -237,11 +276,15 @@ export function EasyStartOfframpCashOut({
           partnerUserRef,
           accessToken
         );
-        const to = coinbaseDepositAddress(latest);
+        const to = coinbaseDepositAddress(
+          latest,
+          asset === "ALGO" ? "algorand" : "evm"
+        );
         const sellAmt = coinbaseSellAmount(latest) || amount;
         if (to && sellAmt && !cancelled) {
           try {
-            await sendUsdcTo(to, sellAmt);
+            if (asset === "ALGO") await sendAlgoTo(to, sellAmt);
+            else await sendUsdcTo(to, sellAmt);
           } catch (e: unknown) {
             if (cancelled) return;
             const message = e instanceof Error ? e.message : String(e);
@@ -265,10 +308,10 @@ export function EasyStartOfframpCashOut({
     return () => {
       cancelled = true;
     };
-  }, [amount, getAccessToken, partnerUserRef, phase, provider, sendUsdcTo]);
+  }, [amount, asset, getAccessToken, partnerUserRef, phase, provider, sendAlgoTo, sendUsdcTo]);
 
   const startCoinbase = async () => {
-    if (!evmAddress) return;
+    if (asset === "ALGO" ? !algorandAddress : !evmAddress) return;
     if (resumePartnerUserRef && !resumeSendTxHash) {
       setPartnerUserRef(resumePartnerUserRef);
       setPhase("awaiting_provider");
@@ -279,9 +322,11 @@ export function EasyStartOfframpCashOut({
     try {
       const accessToken = await requireAccessToken();
       const session = await createCoinbaseOfframpSession({
-        address: evmAddress,
+        address: asset === "ALGO" ? algorandAddress! : evmAddress,
         accessToken,
         amount: amount ?? undefined,
+        destination: asset === "ALGO" ? "algorand" : undefined,
+        cashoutMethod: asset === "ALGO" ? cashoutMethod : undefined,
       });
       if (!session.sellUrl) {
         throw new Error("Coinbase cash-out URL missing. Redeploy the API.");
@@ -289,6 +334,8 @@ export function EasyStartOfframpCashOut({
       saveCoinbaseOfframpPending({
         partnerUserRef: session.partnerUserRef,
         amount: amount ?? null,
+        asset,
+        cashoutMethod: asset === "ALGO" ? cashoutMethod : undefined,
       });
       window.location.assign(session.sellUrl);
     } catch (e: unknown) {
@@ -320,6 +367,12 @@ export function EasyStartOfframpCashOut({
   };
 
   const handleCashOut = async () => {
+    if (asset === "ALGO") {
+      if (!algorandAddress) return;
+      setError(null);
+      void startCoinbase();
+      return;
+    }
     if (!address) return;
     setError(null);
     setPhase("opening");
@@ -432,7 +485,9 @@ export function EasyStartOfframpCashOut({
           <p className="text-sm text-muted-foreground text-center">
             {consumerCopy
               ? "Waiting for cash-out details. Confirm the send when prompted."
-              : "Waiting for Coinbase sell details. Confirm the USDC send when prompted."}
+              : asset === "ALGO"
+                ? "Waiting for Coinbase sell details. Confirm the ALGO send when prompted."
+                : "Waiting for Coinbase sell details. Confirm the USDC send when prompted."}
           </p>
         ) : null}
 
@@ -485,7 +540,11 @@ export function EasyStartOfframpCashOut({
         ) : (
           <Button
             className="h-12 w-full rounded-xl bg-ocean-teal text-base font-semibold text-white hover:bg-ocean-teal/90"
-            disabled={!evmAddress || !providerReady || busy}
+            disabled={
+              (asset === "ALGO" ? !algorandAddress : !evmAddress) ||
+              !providerReady ||
+              busy
+            }
             onClick={() => void handleCashOut()}
           >
             {busy ? (

@@ -3,6 +3,8 @@ import { createContext, useContext } from "react";
 export type EasyStartModalsContextValue = {
   openDeposit: () => void;
   openWithdraw: () => void;
+  /** Algorand asset swap via Haystack, signed by the Privy embedded wallet. */
+  openSwap: () => void;
   /** Advanced Base ↔ Algorand USDC move via XO Swap (escape hatch). */
   openBridge: () => void;
 };
@@ -18,6 +20,9 @@ export function useEasyStartModals(): EasyStartModalsContextValue {
         console.warn("EasyStartModalsProvider is not mounted");
       },
       openWithdraw: () => {
+        console.warn("EasyStartModalsProvider is not mounted");
+      },
+      openSwap: () => {
         console.warn("EasyStartModalsProvider is not mounted");
       },
       openBridge: () => {
