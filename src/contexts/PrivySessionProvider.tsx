@@ -41,6 +41,11 @@ import {
 
 const PRIVY_APP_ID = getPrivyAppId();
 
+/** User closed the Privy modal — not a login failure. */
+function isPrivyAuthDismissed(code: unknown): boolean {
+  return code === "exited_auth_flow" || code === "exited_update_flow";
+}
+
 function privyDisplayName(
   user: ReturnType<typeof usePrivy>["user"]
 ): string | null {
@@ -70,6 +75,7 @@ function PrivyEasyStartStateBridge({
   const { toast } = useToast();
   const { login: privyLogin } = useLogin({
     onError: (code) => {
+      if (isPrivyAuthDismissed(code)) return;
       console.error("[Easy Start] Privy login error", code);
       toast({
         title: "Get Started failed",
