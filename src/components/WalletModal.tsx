@@ -6,13 +6,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Wallet, ExternalLink, Mail, Sparkles } from "lucide-react";
+import { ChevronLeft, Wallet, ExternalLink, Mail } from "lucide-react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getEnabledNetworks,
   getNetworkConfig,
+  getNetworkDisplayName,
   isAVMNetwork,
   isEVMNetwork,
   type NetworkId,
@@ -52,14 +53,13 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
   const privyEasyStart = usePrivyEasyStart();
   const openEasyStartLogin = useEasyStartLogin();
   const [isEasyStartLoading, setIsEasyStartLoading] = useState(false);
+  const [showWallets, setShowWallets] = useState(false);
 
   const showGetStarted =
     privyEasyStart.enabled &&
     privyEasyStart.configured &&
     !privyEasyStart.authenticated;
 
-  // Get network configuration
-  const networkConfig = getNetworkConfig(currentNetwork);
   const isAVM = isAVMNetwork(currentNetwork);
   const isEVM = isEVMNetwork(currentNetwork);
   const enabledNetworks = getEnabledNetworks();
@@ -249,6 +249,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
       // Clear any ongoing connection state when modal closes
       setIsConnecting(null);
       setPendingNetworkId(null);
+      setShowWallets(false);
       // Clear timeout if it exists
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -441,145 +442,107 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-6 max-h-[90vh] overflow-y-auto relative">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 p-2 rounded-full bg-white/90 hover:bg-white dark:bg-zinc-900/90 dark:hover:bg-zinc-900"
-          aria-label="Close"
-        >
-          <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        <DialogHeader className="pb-4">
+        <DialogHeader className="pb-4 pr-8">
+          {showGetStarted && showWallets ? (
+            <button
+              type="button"
+              onClick={() => setShowWallets(false)}
+              className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back
+            </button>
+          ) : null}
           <DialogTitle className="text-xl font-semibold text-center">
-            {showGetStarted ? "Get Started" : "Connect Wallet"}
+            {showGetStarted && !showWallets ? "Get Started" : "Connect Wallet"}
           </DialogTitle>
-          <p className="text-sm text-muted-foreground text-center">
-            {showGetStarted
-              ? "Create an account with email, or connect an existing wallet."
-              : `Choose a wallet to connect on ${networkConfig.name}`}
-          </p>
+          {showGetStarted && !showWallets ? null : (
+            <p className="text-sm text-muted-foreground text-center">
+              Choose a wallet on {getNetworkDisplayName(currentNetwork)}
+            </p>
+          )}
         </DialogHeader>
 
+        {showGetStarted && !showWallets ? (
+          <div className="space-y-3 py-2">
+            <Button
+              type="button"
+              onClick={() => void handleEasyStartEmail()}
+              disabled={
+                isEasyStartLoading ||
+                (!privyEasyStart.login && !privyEasyStart.configured)
+              }
+              className="h-12 w-full rounded-xl bg-ocean-teal text-base font-semibold text-white hover:bg-ocean-teal/90"
+            >
+              {isEasyStartLoading ? (
+                <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Continue with email
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowWallets(true)}
+              className="h-12 w-full rounded-xl text-base font-semibold"
+            >
+              <Wallet className="mr-2 h-4 w-4" />
+              Connect wallet
+            </Button>
+          </div>
+        ) : (
         <div className="space-y-4 py-2">
           {showNetworkSelector ? (
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Network
-              </p>
-              <div className="grid gap-2">
-                {enabledNetworks.map((networkId) => {
-                  const config = getNetworkConfig(networkId);
-                  const isCurrent = networkId === currentNetwork;
-                  const isPending = pendingNetworkId === networkId;
-                  const busy =
-                    isSwitchingNetwork || pendingNetworkId != null;
-                  return (
-                    <button
-                      key={networkId}
-                      type="button"
-                      onClick={() => void handleNetworkSelect(networkId)}
-                      disabled={busy}
-                      className={cn(
-                        "flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors",
-                        isCurrent
-                          ? "border-ocean-teal/50 bg-ocean-teal/10"
-                          : "border-gray-200/50 dark:border-gray-700/50 hover:border-ocean-teal/40",
-                        busy && "cursor-wait",
-                        busy && !isCurrent && !isPending && "opacity-50"
-                      )}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <img
-                          src={getNetworkLogoPath(networkId)}
-                          alt={`${config.name} logo`}
-                          className="w-8 h-8 rounded-full shrink-0"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.src = "/placeholder.svg";
-                          }}
-                        />
-                        <div className="min-w-0">
-                          <p className="font-medium text-sm">
-                            {config.name}
-                            {isPending ? " (Switching…)" : ""}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {config.networkType.toUpperCase()}
-                          </p>
-                        </div>
-                      </div>
-                      {isPending ? (
-                        <div className="w-4 h-4 shrink-0 border-2 border-ocean-teal border-t-transparent rounded-full animate-spin" />
-                      ) : isCurrent ? (
-                        <div className="w-2 h-2 shrink-0 bg-green-500 rounded-full" />
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
+            <div
+              className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1"
+              role="group"
+              aria-label="Network"
+            >
+              {enabledNetworks.map((networkId) => {
+                const isCurrent = networkId === currentNetwork;
+                const isPending = pendingNetworkId === networkId;
+                const busy = isSwitchingNetwork || pendingNetworkId != null;
+                return (
+                  <button
+                    key={networkId}
+                    type="button"
+                    onClick={() => void handleNetworkSelect(networkId)}
+                    disabled={busy}
+                    aria-pressed={isCurrent}
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                      isCurrent
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:bg-muted/60",
+                      busy && "cursor-wait",
+                      busy && !isCurrent && !isPending && "opacity-50"
+                    )}
+                  >
+                    <img
+                      src={getNetworkLogoPath(networkId)}
+                      alt=""
+                      className="h-4 w-4 shrink-0 rounded-full"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = "/placeholder.svg";
+                      }}
+                    />
+                    <span className="truncate">
+                      {getNetworkDisplayName(networkId)}
+                      {isPending ? "…" : ""}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           ) : (
-            <div className="flex items-center justify-center">
-              <div className="px-3 py-1 rounded-full bg-ocean-teal/20 text-ocean-teal text-xs font-medium">
-                {networkConfig.name}
-                {" · "}
-                {isAVM ? "AVM" : isEVM ? "EVM" : "Network"}
-              </div>
-            </div>
+            <p className="text-center text-xs text-muted-foreground">
+              Wallets on {getNetworkDisplayName(currentNetwork)}
+            </p>
           )}
-
-          {showGetStarted ? (
-            <>
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Get started
-                </p>
-                <div className="flex items-center justify-between gap-3 p-4 rounded-lg border border-ocean-teal/30 bg-ocean-teal/5 hover:border-ocean-teal/50 transition-colors">
-                  <div className="flex items-center space-x-3 min-w-0">
-                    <div className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-ocean-teal/15 text-ocean-teal">
-                      <Sparkles className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="font-medium text-sm">Continue with email</h3>
-                      <p className="text-xs text-muted-foreground">
-                        Easy Start — no browser wallet required
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    onClick={() => void handleEasyStartEmail()}
-                    disabled={
-                      isEasyStartLoading ||
-                      (!privyEasyStart.login && !privyEasyStart.configured)
-                    }
-                    className="bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold shrink-0"
-                    size="sm"
-                  >
-                    {isEasyStartLoading ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        <Mail className="w-4 h-4 mr-1" />
-                        Email
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="relative py-1">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase tracking-wide">
-                  <span className="bg-background px-2 text-muted-foreground">
-                    Or connect a wallet
-                  </span>
-                </div>
-              </div>
-            </>
-          ) : null}
 
           {walletProviders.map((provider) => (
             <div
@@ -647,12 +610,15 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
             </div>
           ))}
         </div>
+        )}
 
-        <div className="pt-6 mt-4 border-t border-gray-200/50 dark:border-gray-700/50">
-          <p className="text-xs text-muted-foreground text-center">
-            By connecting, you agree to our Terms of Service and Privacy Policy.
-          </p>
-        </div>
+        {showGetStarted && !showWallets ? null : (
+          <div className="pt-6 mt-4 border-t border-gray-200/50 dark:border-gray-700/50">
+            <p className="text-xs text-muted-foreground text-center">
+              By connecting, you agree to our Terms of Service and Privacy Policy.
+            </p>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
