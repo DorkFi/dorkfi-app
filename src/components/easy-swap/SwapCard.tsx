@@ -130,7 +130,7 @@ function AssetPicker({
             }
             placeholder="0.0"
             className={cn(
-              "min-w-0 flex-1 bg-transparent text-3xl font-semibold outline-none placeholder:text-muted-foreground/40",
+              "min-w-0 flex-1 bg-transparent text-3xl font-semibold outline-none placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0",
               amountReadOnly && "text-muted-foreground"
             )}
           />
