@@ -14,6 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useWallet } from "@txnlab/use-wallet-react";
+import { useNetwork } from "@/contexts/NetworkContext";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { IsolateErrorBoundary } from "@/components/IsolateErrorBoundary";
@@ -50,6 +52,11 @@ const EasyStartBridgeSheet = lazy(() =>
 const EasyStartSwapSheet = lazy(() =>
   import("@/components/easy-start/EasyStartSwapSheet").then((m) => ({
     default: m.EasyStartSwapSheet,
+  }))
+);
+const WalletAddMoneySheet = lazy(() =>
+  import("@/components/easy-start/WalletAddMoneySheet").then((m) => ({
+    default: m.WalletAddMoneySheet,
   }))
 );
 
@@ -123,6 +130,8 @@ function EasyStartSheetFallback({
  */
 export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const privy = usePrivyEasyStart();
+  const { activeAccount } = useWallet();
+  const { currentNetwork } = useNetwork();
   const consumerCopy = useConsumerCopy();
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -155,11 +164,18 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
     [openDeposit, openWithdraw, openSwap, openBridge]
   );
 
-  const showSheets = privy.enabled && privy.configured && privy.authenticated;
+  const showPrivySheets =
+    privy.enabled && privy.configured && privy.authenticated;
+  const connectedAlgo =
+    currentNetwork === "algorand-mainnet" && activeAccount?.address
+      ? activeAccount.address
+      : null;
+  const showWalletTools = Boolean(connectedAlgo) && !showPrivySheets;
+  const showSheets = showPrivySheets || showWalletTools;
 
   useEffect(() => {
-    if (offrampResume && showSheets) setWithdrawOpen(true);
-  }, [offrampResume, showSheets]);
+    if (offrampResume && showPrivySheets) setWithdrawOpen(true);
+  }, [offrampResume, showPrivySheets]);
 
   const openAdvancedBridge = useCallback(() => {
     setDepositOpen(false);
@@ -194,13 +210,21 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                   />
                 }
               >
-                <EasyStartDepositSheet
-                  open={depositOpen}
-                  onOpenChange={setDepositOpen}
-                  onOpenAdvancedBridge={
-                    consumerCopy ? undefined : openAdvancedBridge
-                  }
-                />
+                {showWalletTools && connectedAlgo ? (
+                  <WalletAddMoneySheet
+                    open={depositOpen}
+                    onOpenChange={setDepositOpen}
+                    address={connectedAlgo}
+                  />
+                ) : (
+                  <EasyStartDepositSheet
+                    open={depositOpen}
+                    onOpenChange={setDepositOpen}
+                    onOpenAdvancedBridge={
+                      consumerCopy ? undefined : openAdvancedBridge
+                    }
+                  />
+                )}
               </Suspense>
             </IsolateErrorBoundary>
           ) : null}
@@ -229,11 +253,12 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                 <EasyStartSwapSheet
                   open={swapOpen}
                   onOpenChange={setSwapOpen}
+                  walletAddress={showWalletTools ? connectedAlgo : null}
                 />
               </Suspense>
             </IsolateErrorBoundary>
           ) : null}
-          {withdrawOpen ? (
+          {showPrivySheets && withdrawOpen ? (
             <IsolateErrorBoundary
               label="Cash out"
               fallback={({ error, retry }) => (
@@ -267,7 +292,7 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
               </Suspense>
             </IsolateErrorBoundary>
           ) : null}
-          {bridgeOpen && !consumerCopy ? (
+          {showPrivySheets && bridgeOpen && !consumerCopy ? (
             <IsolateErrorBoundary
               label="Bridge"
               fallback={({ error, retry }) => (

@@ -17,6 +17,8 @@ import {
   Trash2,
   Mail,
   Sparkles,
+  ArrowDownToLine,
+  ArrowLeftRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAddressName } from "@/hooks/useAddressName";
@@ -34,6 +36,7 @@ import { EasyStartConnectMenu, EasyStartButton } from "@/components/easy-start/E
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { useEasyStartModals } from "@/contexts/easyStartModals";
 
 interface WalletNetworkButtonProps {
   currentNetwork?: NetworkId;
@@ -66,6 +69,10 @@ const WalletNetworkButton = ({
     privyEasyStart.enabled && privyEasyStart.configured;
   const openEasyStartLogin = useEasyStartLogin();
   const consumerCopy = useConsumerCopy();
+  const { openDeposit, openSwap } = useEasyStartModals();
+  const showWalletFunding =
+    contextNetwork === "algorand-mainnet" &&
+    !privyEasyStart.authenticated;
 
   const handlePrivyEmailLogin = () => {
     void openEasyStartLogin();
@@ -351,6 +358,24 @@ const WalletNetworkButton = ({
                 Wallet
               </div>
             </div>
+            {showWalletFunding ? (
+              <>
+                <DropdownMenuItem
+                  onClick={openDeposit}
+                  className="cursor-pointer"
+                >
+                  <ArrowDownToLine className="w-4 h-4 mr-2" />
+                  Add money
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={openSwap}
+                  className="cursor-pointer"
+                >
+                  <ArrowLeftRight className="w-4 h-4 mr-2" />
+                  Swap
+                </DropdownMenuItem>
+              </>
+            ) : null}
             <DropdownMenuItem
               onClick={handleCopyAddress}
               className="cursor-pointer"

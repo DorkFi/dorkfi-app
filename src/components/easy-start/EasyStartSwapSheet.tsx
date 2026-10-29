@@ -11,17 +11,23 @@ import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 interface EasyStartSwapSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Connected Algorand wallet. Omit to swap the Easy Start xChain account. */
+  walletAddress?: string | null;
 }
 
 /**
- * Algorand asset swap for the Easy Start xChain account, quoted and executed
- * through Haystack. The Privy embedded EVM wallet signs the group.
+ * Algorand asset swap, quoted and executed through Haystack.
+ * Easy Start signs with the Privy xChain account. A connected wallet signs itself.
  */
 export function EasyStartSwapSheet({
   open,
   onOpenChange,
+  walletAddress = null,
 }: EasyStartSwapSheetProps) {
   const { algorandAddress, algorandAddressLoading } = usePrivyEasyStart();
+  const usingWallet = Boolean(walletAddress);
+  const address = usingWallet ? walletAddress : algorandAddress;
+  const loading = usingWallet ? false : algorandAddressLoading;
   const [signing, setSigning] = useState(false);
   const signingRef = useRef(false);
 
@@ -74,12 +80,12 @@ export function EasyStartSwapSheet({
         />
         <div className="px-6 pb-6">
           <SwapCard
-            embedded
+            embedded={!usingWallet}
             networkId="algorand-mainnet"
-            accountAddress={algorandAddress}
-            accountLoading={algorandAddressLoading}
+            accountAddress={address}
+            accountLoading={loading}
             accountError={
-              algorandAddressLoading
+              usingWallet || loading
                 ? null
                 : "Algorand account isn’t ready yet."
             }

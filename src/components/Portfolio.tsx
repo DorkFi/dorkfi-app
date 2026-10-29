@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { EasyStartFundingStrip } from "@/components/portfolio/EasyStartFundingStrip";
+import { ConnectedWalletActions } from "@/components/portfolio/ConnectedWalletActions";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useAddressName } from "@/hooks/useAddressName";
 import { useAvatarImage } from "@/hooks/useAvatarImage";
@@ -5866,6 +5867,12 @@ const Portfolio = () => {
         </div>
       )}
       {easyStartPending && <EasyStartFundingStrip />}
+      {!easyStartPending &&
+      currentNetwork === "algorand-mainnet" &&
+      activeAccount?.address &&
+      activeAccount.address === displayAddress ? (
+        <ConnectedWalletActions />
+      ) : null}
 
       {/* Render health factor section after avatar check is complete */}
       {isAvatarResolved &&

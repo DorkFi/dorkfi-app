@@ -27,6 +27,10 @@ import {
   partnerUserRefFromUserId,
 } from "./clientIp.ts";
 import { resolveCoinbaseRedirectUrl } from "./redirectUrl.ts";
+import {
+  partnerUserRefFromAlgorandAddress,
+  verifyAlgorandOnrampProof,
+} from "./walletProof.ts";
 import { cdpFailureMessage, parseCdpBody } from "./cdpResponse.ts";
 import {
   assertWalletOwnedByUser,
@@ -142,15 +146,17 @@ export async function handleCoinbaseSession(
   env: OfframpEnv
 ): Promise<void> {
   try {
-    const { userId } = await requirePrivyAuth(req, env.privyAppId);
     const body = (await readJsonBody(req)) as {
       address?: string;
       redirectUrl?: string;
       amount?: string | number;
       destination?: string;
       cashoutMethod?: string;
+      walletProof?: string;
     };
     const wantsAlgo = body.destination === "algorand";
+    const walletProof =
+      typeof body.walletProof === "string" ? body.walletProof.trim() : "";
     const cashoutMethod = parseCoinbaseCashoutMethod(body.cashoutMethod);
     if (body.cashoutMethod != null && body.cashoutMethod !== "" && !cashoutMethod) {
       sendJson(res, 400, { error: "Unsupported Coinbase cash-out method" });
@@ -158,29 +164,64 @@ export async function handleCoinbaseSession(
     }
     let address = body.address?.trim() ?? "";
     let target: CoinbaseAssetTarget = COINBASE_BASE_USDC;
+    let partnerUserRef: string;
 
-    if (!env.privyAppSecret) {
-      sendJson(res, 503, {
-        error:
-          "PRIVY_APP_SECRET is required to bind Coinbase destinations to the signed-in wallet",
-      });
-      return;
-    }
-    const owned = await fetchPrivyWalletAddresses({
-      userId,
-      privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
-      privyAppSecret: env.privyAppSecret,
-    });
-
-    if (wantsAlgo) {
-      await assertPrivyOwnsXchainAddress(owned, address);
-      target = COINBASE_ALGORAND_ALGO;
-    } else {
-      if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-        sendJson(res, 400, { error: "Valid Base wallet address required" });
+    if (walletProof) {
+      if (!wantsAlgo) {
+        sendJson(res, 400, {
+          error: "A signed wallet is only accepted for an Algorand buy",
+        });
         return;
       }
-      assertWalletOwnedByUser(address, owned);
+      if (cashoutMethod) {
+        sendJson(res, 400, {
+          error: "Cash out stays on the signed-in Easy Start account",
+        });
+        return;
+      }
+      try {
+        const proven = verifyAlgorandOnrampProof(walletProof);
+        if (address && address !== proven) {
+          sendJson(res, 400, {
+            error: "Address does not match the signed wallet",
+          });
+          return;
+        }
+        address = proven;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Invalid wallet proof";
+        sendJson(res, 401, { error: message });
+        return;
+      }
+      target = COINBASE_ALGORAND_ALGO;
+      partnerUserRef = partnerUserRefFromAlgorandAddress(address);
+    } else {
+      const { userId } = await requirePrivyAuth(req, env.privyAppId);
+      if (!env.privyAppSecret) {
+        sendJson(res, 503, {
+          error:
+            "PRIVY_APP_SECRET is required to bind Coinbase destinations to the signed-in wallet",
+        });
+        return;
+      }
+      const owned = await fetchPrivyWalletAddresses({
+        userId,
+        privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
+        privyAppSecret: env.privyAppSecret,
+      });
+
+      if (wantsAlgo) {
+        await assertPrivyOwnsXchainAddress(owned, address);
+        target = COINBASE_ALGORAND_ALGO;
+      } else {
+        if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+          sendJson(res, 400, { error: "Valid Base wallet address required" });
+          return;
+        }
+        assertWalletOwnedByUser(address, owned);
+      }
+      partnerUserRef = partnerUserRefFromUserId(userId);
     }
 
     const path = "/onramp/v1/token";
@@ -220,7 +261,6 @@ export async function handleCoinbaseSession(
       return;
     }
 
-    const partnerUserRef = partnerUserRefFromUserId(userId);
     const redirectUrl = resolveCoinbaseRedirectUrl(req, body.redirectUrl, {
       OFFRAMP_REDIRECT_URL: env.redirectUrl,
     });

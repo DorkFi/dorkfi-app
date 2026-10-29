@@ -104,6 +104,33 @@ export async function createCoinbaseSession(args: {
   return parseJson<CoinbaseSessionResult>(res);
 }
 
+/**
+ * Coinbase ALGO buy for a connected Algorand wallet.
+ * `walletProof` is a signed 0 ALGO payment; the server checks it and skips Privy.
+ */
+export async function createWalletCoinbaseSession(args: {
+  address: string;
+  walletProof: string;
+  amount?: string;
+  redirectUrl?: string;
+}): Promise<CoinbaseSessionResult> {
+  const res = await fetch(`${offrampBase()}/coinbase/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      address: args.address,
+      walletProof: args.walletProof,
+      amount: args.amount,
+      destination: "algorand",
+      redirectUrl:
+        args.redirectUrl ||
+        import.meta.env.VITE_OFFRAMP_REDIRECT_URL ||
+        `${window.location.origin}/portfolio`,
+    }),
+  });
+  return parseJson<CoinbaseSessionResult>(res);
+}
+
 /** @deprecated Use createCoinbaseSession */
 export const createCoinbaseOfframpSession = createCoinbaseSession;
 
