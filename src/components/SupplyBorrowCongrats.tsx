@@ -1,14 +1,22 @@
 import React from "react";
-import { CheckCircle2, Sparkles } from "lucide-react";
+import { Check, CheckCircle2, Sparkles } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import LpPairIconStack from "@/components/pools/LpPairIconStack";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+
+function consumerAssetDisplayLabel(label: string): string {
+  if (label === "USDC" || label === "fUSDC") return "USD";
+  return label.replace(/\bUSDC\b/g, "USD");
+}
 
 interface SupplyBorrowCongratsProps {
-  transactionType: "deposit" | "borrow" | "withdraw" | "repay";
+  transactionType: "deposit" | "borrow" | "withdraw" | "repay" | "swap";
   asset: string;
   assetIcon: string;
   /** Underlying pair icons for LP markets (preferred over `assetIcon` when set). */
   assetPairIcons?: { asset1Icon: string; asset2Icon: string };
+  /** Swap input asset; when set, the details row shows From → To. */
+  swapFrom?: { symbol: string; icon: string; amount?: string };
   amount: string;
   onViewTransaction: () => void;
   onGoToPortfolio: () => void;
@@ -20,11 +28,44 @@ interface SupplyBorrowCongratsProps {
   aboveActions?: React.ReactNode;
 }
 
+const MAKE_ANOTHER_LABEL: Record<
+  SupplyBorrowCongratsProps["transactionType"],
+  string
+> = {
+  borrow: "Make another borrow",
+  deposit: "Make another deposit",
+  withdraw: "Make another withdrawal",
+  repay: "Make another repay",
+  swap: "Make another swap",
+};
+
+function formatPacificDateTime(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("month")} ${get("day")}, ${get("year")} · ${get("hour")}:${get("minute")} ${get("dayPeriod")} PT`;
+}
+
+function formatConsumerAmount(amount: string, assetLabel: string): string {
+  const numeric = amount.trim().replace(/^\$/, "");
+  const isUsd = /\bUSD\b/i.test(assetLabel) && !/\bLP\b/i.test(assetLabel);
+  return isUsd ? `$${numeric} ${assetLabel}` : `${numeric} ${assetLabel}`;
+}
+
 const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   transactionType,
   asset,
   assetIcon,
   assetPairIcons,
+  swapFrom,
   amount,
   onViewTransaction,
   onGoToPortfolio,
@@ -33,6 +74,8 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   viewTransactionDisabled = false,
   aboveActions,
 }) => {
+  const consumerCopy = useConsumerCopy();
+  const completedAt = React.useMemo(() => new Date(), []);
   const getTransactionMessage = () => {
     switch (transactionType) {
       case "deposit":
@@ -43,13 +86,123 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         return { action: "withdrew", preposition: "from" };
       case "repay":
         return { action: "repaid", preposition: "to" };
+      case "swap":
+        return { action: "swapped", preposition: "for" };
       default:
         return { action: "processed", preposition: "with" };
     }
   };
 
   const { action, preposition } = getTransactionMessage();
-  const assetLabel = assetPairIcons ? `${asset} LP` : asset;
+  const displayAsset = consumerCopy
+    ? consumerAssetDisplayLabel(asset)
+    : asset;
+  const displayFrom = swapFrom
+    ? consumerCopy
+      ? consumerAssetDisplayLabel(swapFrom.symbol)
+      : swapFrom.symbol
+    : null;
+  const assetLabel = assetPairIcons ? `${displayAsset} LP` : displayAsset;
+  const swapFromAmount = swapFrom?.amount?.trim() || "";
+  const defiSwapSummary =
+    transactionType === "swap" && displayFrom
+      ? swapFromAmount
+        ? `${swapFromAmount} ${displayFrom} for ${amount} ${assetLabel}`
+        : `${amount} ${assetLabel}`
+      : null;
+
+  if (consumerCopy) {
+    return (
+      <div className="flex w-full flex-col items-center text-center animate-fade-in">
+        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-[#E5F8EF]">
+          <Check
+            className="h-9 w-9 text-[#4ADE80]"
+            strokeWidth={2.5}
+            aria-hidden
+          />
+        </div>
+
+        <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+          Transaction complete
+        </h2>
+        <p className="mt-1.5 text-sm text-slate-500">
+          You successfully {action}
+        </p>
+        <p className="mt-3 text-3xl font-semibold leading-none text-ocean-teal">
+          {formatConsumerAmount(amount, assetLabel)}
+        </p>
+
+        <div className="mt-6 w-full overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-sm text-slate-500">
+              {transactionType === "swap" ? "Swap" : "Asset"}
+            </span>
+            <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
+              {swapFrom && displayFrom ? (
+                <>
+                  <img
+                    src={swapFrom.icon}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                  {displayFrom}
+                  <span className="text-slate-400" aria-hidden>
+                    →
+                  </span>
+                  <img
+                    src={assetIcon}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                  {assetLabel}
+                </>
+              ) : assetPairIcons ? (
+                <LpPairIconStack
+                  asset1Icon={assetPairIcons.asset1Icon}
+                  asset2Icon={assetPairIcons.asset2Icon}
+                  fallbackIcon={assetIcon}
+                  alt={asset}
+                  size="sm"
+                />
+              ) : (
+                <img
+                  src={assetIcon}
+                  alt=""
+                  className="h-5 w-5 rounded-full object-cover"
+                />
+              )}
+              {swapFrom ? null : assetLabel}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+            <span className="text-sm text-slate-500">Date & time</span>
+            <span className="text-sm font-medium text-slate-800">
+              {formatPacificDateTime(completedAt)}
+            </span>
+          </div>
+        </div>
+
+        {aboveActions}
+
+        <DorkFiButton
+          variant="primary"
+          size="lg"
+          className="mt-6 w-full rounded-xl bg-ocean-teal text-base hover:bg-ocean-teal/90"
+          onClick={onMakeAnother}
+        >
+          {MAKE_ANOTHER_LABEL[transactionType]}
+        </DorkFiButton>
+
+        <button
+          type="button"
+          className="mt-3 text-sm font-medium text-ocean-teal underline underline-offset-2 transition-colors hover:text-ocean-teal/80"
+          onClick={onGoToPortfolio}
+        >
+          View portfolio
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 animate-fade-in">
@@ -85,9 +238,9 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
       <div className="text-center text-base text-slate-700 dark:text-slate-200 mb-2 font-medium">
         You successfully {action}{" "}
         <span className="text-whale-gold">
-          {amount} {assetLabel}
-        </span>{" "}
-        {preposition} the protocol.
+          {defiSwapSummary ?? `${amount} ${assetLabel}`}
+        </span>
+        {transactionType === "swap" ? "." : ` ${preposition} the protocol.`}
       </div>
 
       {aboveActions}
@@ -101,14 +254,6 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         >
           View Transaction
         </DorkFiButton>
-
-        {/*<DorkFiButton
-          variant="secondary"
-          className="w-full border-ocean-teal text-ocean-teal dark:border-whale-gold dark:text-whale-gold"
-          onClick={onGoToPortfolio}
-        >
-          Go to Portfolio
-        </DorkFiButton>*/}
 
         <DorkFiButton
           variant="secondary"

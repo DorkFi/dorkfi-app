@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { config } from "./config.js";
+import { handleHonoOfframp } from "./offramp/honoAdapter.js";
 import { isSocialCrawler } from "./lib/isSocialCrawler.js";
 import {
   buildBorrowRedirectUrl,
@@ -47,8 +48,11 @@ app.use(
     origin: config.frontendOrigins,
     // Share link flows do not use cookies; keep CORS simple for beta/app.
     credentials: false,
+    allowHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+app.all("/api/offramp/*", (c) => handleHonoOfframp(c));
 
 app.get("/health", (c) =>
   c.json({

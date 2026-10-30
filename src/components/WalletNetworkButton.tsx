@@ -14,22 +14,29 @@ import {
   LogOut,
   CheckCircle,
   ChevronDown,
-  Wifi,
-  WifiOff,
   Trash2,
+  Mail,
+  Sparkles,
+  ArrowDownToLine,
+  ArrowLeftRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAddressName } from "@/hooks/useAddressName";
 import WalletModal from "./WalletModal";
 import AccountSelector from "./AccountSelector";
 import {
-  config,
   NetworkId,
   getNetworkConfig,
   getEnabledNetworks,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import { EasyStartConnectMenu, EasyStartButton } from "@/components/easy-start/EasyStartAuthControls";
+import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { useEasyStartModals } from "@/contexts/easyStartModals";
 
 interface WalletNetworkButtonProps {
   currentNetwork?: NetworkId;
@@ -57,6 +64,19 @@ const WalletNetworkButton = ({
     useState<NetworkId>(contextNetwork);
   const { toast } = useToast();
   const { name: addressName } = useAddressName(activeAccount?.address);
+  const privyEasyStart = usePrivyEasyStart();
+  const showEasyStartEntry =
+    privyEasyStart.enabled && privyEasyStart.configured;
+  const openEasyStartLogin = useEasyStartLogin();
+  const consumerCopy = useConsumerCopy();
+  const { openDeposit, openSwap } = useEasyStartModals();
+  const showWalletFunding =
+    contextNetwork === "algorand-mainnet" &&
+    !privyEasyStart.authenticated;
+
+  const handlePrivyEmailLogin = () => {
+    void openEasyStartLogin();
+  };
 
   // Determine which networks are supported by the connected wallet
   const getSupportedNetworks = (): NetworkId[] => {
@@ -294,7 +314,19 @@ const WalletNetworkButton = ({
   const isOnline = true; // You can implement actual network status checking here
   const enabledNetworks = getEnabledNetworks();
   const supportedNetworks = getSupportedNetworks();
-  const showNetworkSection = supportedNetworks.length > 1;
+  const showNetworkSection = supportedNetworks.length > 1 && !consumerCopy;
+
+  if (
+    !activeAccount &&
+    showEasyStartEntry &&
+    privyEasyStart.authenticated
+  ) {
+    return <EasyStartConnectMenu />;
+  }
+
+  if (consumerCopy && showEasyStartEntry && !activeAccount) {
+    return <EasyStartButton />;
+  }
 
   if (activeAccount) {
     return (
@@ -326,6 +358,24 @@ const WalletNetworkButton = ({
                 Wallet
               </div>
             </div>
+            {showWalletFunding ? (
+              <>
+                <DropdownMenuItem
+                  onClick={openDeposit}
+                  className="cursor-pointer"
+                >
+                  <ArrowDownToLine className="w-4 h-4 mr-2" />
+                  Add money
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={openSwap}
+                  className="cursor-pointer"
+                >
+                  <ArrowLeftRight className="w-4 h-4 mr-2" />
+                  Swap
+                </DropdownMenuItem>
+              </>
+            ) : null}
             <DropdownMenuItem
               onClick={handleCopyAddress}
               className="cursor-pointer"
@@ -335,7 +385,7 @@ const WalletNetworkButton = ({
               ) : (
                 <Copy className="w-4 h-4 mr-2" />
               )}
-              {copied ? "Copied!" : "Copy Address"}
+              {copied ? "Copied!" : consumerCopy ? "Copy address" : "Copy Address"}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={handleDisconnect}
@@ -412,19 +462,54 @@ const WalletNetworkButton = ({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105 flex items-center gap-2">
-            <Wallet className="w-4 h-4" />
-            <span className="hidden sm:inline">Connect Wallet</span>
-            <span className="sm:hidden">Connect</span>
+            {showEasyStartEntry ? (
+              <Sparkles className="w-4 h-4" />
+            ) : (
+              <Wallet className="w-4 h-4" />
+            )}
+            <span className="hidden sm:inline">
+              {showEasyStartEntry ? "Get Started" : "Connect Wallet"}
+            </span>
+            <span className="sm:hidden">
+              {showEasyStartEntry ? "Start" : "Connect"}
+            </span>
             <ChevronDown className="w-4 h-4 opacity-70" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
-          {/* Connect Wallet Section */}
-          <div className="px-2 py-1.5">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Wallet
+          {showEasyStartEntry ? (
+            <>
+              <div className="px-2 py-1.5">
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Get started
+                </div>
+              </div>
+              <DropdownMenuItem
+                onSelect={() => {
+                  handlePrivyEmailLogin();
+                }}
+                disabled={!privyEasyStart.login && !privyEasyStart.configured}
+                className="cursor-pointer"
+              >
+                <Mail className="w-4 h-4 mr-2" />
+                Email
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator />
+
+              <div className="px-2 py-1.5">
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Wallet
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="px-2 py-1.5">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Wallet
+              </div>
             </div>
-          </div>
+          )}
           <DropdownMenuItem
             onClick={handleOpenWalletModal}
             className="cursor-pointer"
@@ -433,71 +518,7 @@ const WalletNetworkButton = ({
             Connect Wallet
           </DropdownMenuItem>
 
-          {showNetworkSection && (
-            <>
-              <DropdownMenuSeparator />
-
-              {/* Network Section */}
-              <div className="px-2 py-1.5">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Network
-                </div>
-              </div>
-              {getSupportedNetworks().map((networkId) => {
-                const networkConfig = getNetworkConfig(networkId);
-                const isCurrentlySwitching =
-                  isSwitchingNetwork && selectedNetwork === networkId;
-                const isDisabled = isSwitchingNetwork;
-                const isCurrentNetwork = selectedNetwork === networkId;
-
-                return (
-                  <DropdownMenuItem
-                    key={networkId}
-                    onClick={() =>
-                      !isDisabled && handleNetworkChange(networkId)
-                    }
-                    className={`flex items-center justify-between ${
-                      isDisabled
-                        ? "cursor-not-allowed opacity-50"
-                        : "cursor-pointer"
-                    } ${isCurrentNetwork ? "bg-accent" : ""}`}
-                    disabled={isDisabled}
-                  >
-                    <div className="flex items-center gap-2">
-                      {isCurrentlySwitching ? (
-                        <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <img
-                          src={getNetworkLogoPath(networkId)}
-                          alt={`${networkConfig.name} logo`}
-                          className="w-6 h-6 rounded-full"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.src = "/placeholder.svg";
-                          }}
-                        />
-                      )}
-                      <div className="flex flex-col">
-                        <span className="font-medium text-sm">
-                          {networkConfig.name}
-                          {isCurrentlySwitching && " (Switching...)"}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {networkConfig.networkType.toUpperCase()}
-                          {!activeAccount &&
-                            !isCurrentNetwork &&
-                            " • Connect wallet"}
-                        </span>
-                      </div>
-                    </div>
-                    {isCurrentNetwork && !isCurrentlySwitching && (
-                      <div className="w-2 h-2 bg-green-500 rounded-full" />
-                    )}
-                  </DropdownMenuItem>
-                );
-              })}
-            </>
-          )}
+          <AppSettingsMenuSection />
 
           <DropdownMenuSeparator />
           <DropdownMenuItem

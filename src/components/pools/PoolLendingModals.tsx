@@ -213,7 +213,7 @@ const PoolLendingModals = ({
       lendingMarket.marketId,
       networkId
     );
-    setSuppliedBalance(deposited ?? 0);
+    setSuppliedBalance(deposited?.balance ?? 0);
   }, [
     activeAccount?.address,
     lendingMarket.decimals,

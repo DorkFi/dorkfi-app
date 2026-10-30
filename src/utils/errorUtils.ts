@@ -90,6 +90,14 @@ function formatAlgo(microAlgos: number): string {
 export function getUserFriendlyError(error: unknown): string {
   const errorMessage = error instanceof Error ? error.message : String(error);
 
+  if (
+    error instanceof Error &&
+    (error.name === "SponsorFundingError" ||
+      errorMessage.startsWith("Could not set up this account"))
+  ) {
+    return errorMessage;
+  }
+
   if (errorMessage.includes("compatible wallet")) {
     return errorMessage;
   }
@@ -125,6 +133,11 @@ export function getUserFriendlyError(error: unknown): string {
     const shortfall = formatAlgo(minRequired - currentBalance);
 
     return `Insufficient ALGO balance for transaction fees. You need at least ${requiredAlgo} ALGO but only have ${currentAlgo} ALGO. Please add at least ${shortfall} ALGO to your wallet.`;
+  }
+
+  // Algod overspend when building / simulating groups ("tried to spend …")
+  if (errorMessage.toLowerCase().includes("tried to spend")) {
+    return "Insufficient ALGO for this transaction (fees and min-balance). Top up a little ALGO and try again.";
   }
 
   // Handle generic insufficient balance errors

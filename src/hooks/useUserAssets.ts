@@ -73,7 +73,7 @@ export const useUserAssets = (userAddress: string) => {
           const market = markets.find((m) => m.symbol === token.symbol);
           
           // Fetch both deposit and borrow balances
-          const [depositBalance, borrowData] = await Promise.all([
+          const [depositData, borrowData] = await Promise.all([
             fetchUserDepositBalance(
               userAddress,
               token.poolId,
@@ -88,7 +88,8 @@ export const useUserAssets = (userAddress: string) => {
             )
           ]);
 
-          // Extract borrow balance from the new return type
+          // Extract balances from the return types
+          const depositBalance = depositData?.balance || 0;
           const borrowBalance = borrowData?.balance || 0;
 
           // Calculate USD values
