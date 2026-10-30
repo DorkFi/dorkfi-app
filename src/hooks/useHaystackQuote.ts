@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
 import BigNumber from "bignumber.js";
 import type { NetworkId } from "@/config";
 import {
@@ -17,6 +16,11 @@ export type HaystackQuoteInput = {
   amount: string;
   fromDecimals: number;
   toDecimals: number;
+  /**
+   * Account that will sign the swap. Haystack `autoOptIn` only prepends the
+   * output-ASA opt-in when this is the real swapper (not a different connected wallet).
+   */
+  address?: string | null;
   enabled?: boolean;
 };
 
@@ -65,8 +69,7 @@ export function formatAtomicToHuman(
 export function useHaystackSwapQuote(
   input: HaystackQuoteInput
 ): HaystackQuoteResult {
-  const { activeAccount } = useWallet();
-  const address = activeAccount?.address;
+  const address = input.address?.trim() || undefined;
   const atomic = toAtomic(input.amount, input.fromDecimals);
   const supported = isHaystackSwapSupported(input.networkId);
   const enabled =

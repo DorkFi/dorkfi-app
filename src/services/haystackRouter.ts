@@ -2,7 +2,7 @@
  * Haystack Order Router client for Chub / Easy Swap.
  * @see https://txnlab.gitbook.io/haystack-router
  */
-import { RouterClient } from "@txnlab/haystack-router";
+import { RouterClient, type SwapQuote } from "@txnlab/haystack-router";
 import type { NetworkId } from "@/config";
 import { getNetworkConfig } from "@/config";
 
@@ -39,5 +39,50 @@ export function createHaystackRouterClient(
     algodToken: net.rpcToken ?? "",
     algodPort: port,
     autoOptIn: true,
+  });
+}
+
+/** Subset of RouterClient used to attach an output-ASA opt-in before execute. */
+export type HaystackOutputOptInClient = {
+  needsAssetOptIn: (
+    address: string,
+    assetId: number | bigint
+  ) => Promise<boolean>;
+  newQuote: (params: {
+    fromASAID: number;
+    toASAID: number;
+    amount: bigint;
+    type: "fixed-input";
+    address: string;
+    optIn: true;
+  }) => Promise<SwapQuote>;
+};
+
+/**
+ * Haystack only prepends the output-ASA opt-in when the quote was fetched with
+ * `optIn: true`. Requote at sign time if the swapper still has no holding.
+ * ALGO (asset 0) never needs an opt-in.
+ */
+export async function quoteWithOutputAssetOptIn(args: {
+  client: HaystackOutputOptInClient;
+  quote: SwapQuote;
+  address: string;
+  fromASAID: number;
+  toASAID: number;
+  amount: bigint;
+}): Promise<SwapQuote> {
+  if (args.toASAID === 0) return args.quote;
+  const needsOptIn = await args.client.needsAssetOptIn(
+    args.address,
+    args.toASAID
+  );
+  if (!needsOptIn) return args.quote;
+  return args.client.newQuote({
+    fromASAID: args.fromASAID,
+    toASAID: args.toASAID,
+    amount: args.amount,
+    type: "fixed-input",
+    address: args.address,
+    optIn: true,
   });
 }

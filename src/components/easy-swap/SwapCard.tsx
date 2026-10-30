@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { ArrowDownUp, Check, Loader2 } from "lucide-react";
 import BigNumber from "bignumber.js";
@@ -12,6 +12,7 @@ import {
 import {
   createHaystackRouterClient,
   isHaystackSwapSupported,
+  quoteWithOutputAssetOptIn,
 } from "@/services/haystackRouter";
 import { useHaystackSwapQuote } from "@/hooks/useHaystackQuote";
 import { fetchUserWalletBalance } from "@/services/lendingService";
@@ -20,6 +21,9 @@ import { cn, formatUsdAmount } from "@/lib/utils";
 import WalletModal from "@/components/WalletModal";
 import { useToast } from "@/hooks/use-toast";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import { getTransactionErrorFeedback } from "@/utils/errorUtils";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { pickSwapTxIdFromComposer } from "@/services/haystackSwapExecute";
 
 export type SwapAssetOption = {
   configKey: string;
@@ -216,6 +220,16 @@ function PriceChip({
   );
 }
 
+export type SwapSuccessState = {
+  txId: string;
+  amountIn: string;
+  amountOut: string;
+  fromSymbol: string;
+  fromIcon: string;
+  toSymbol: string;
+  toIcon: string;
+};
+
 /**
  * Simple Haystack-powered swap card — From / To, quote, connect + execute.
  * Embedded mode signs with the Privy xChain account instead of a connected wallet.
@@ -227,7 +241,12 @@ export type SwapCardProps = {
   accountError?: string | null;
   embedded?: boolean;
   onSigningChange?: (signing: boolean) => void;
-  onSwapped?: (txId: string) => void;
+  /** Wallet signature returned; host should show a waiting state. */
+  onAwaitingConfirmation?: () => void;
+  /** Sign/submit failed after waiting started; host should restore the form. */
+  onSwapFailed?: () => void;
+  /** Host owns confirmation UI so it survives Dialog remounts after signing. */
+  onSwapped?: (result: SwapSuccessState) => void;
 };
 
 const SwapCard = ({
@@ -237,13 +256,17 @@ const SwapCard = ({
   accountError = null,
   embedded = false,
   onSigningChange,
+  onAwaitingConfirmation,
+  onSwapFailed,
   onSwapped,
 }: SwapCardProps = {}) => {
   const { currentNetwork } = useNetwork();
   const networkId = networkIdProp ?? (currentNetwork as NetworkId);
-  const { activeAccount, transactionSigner } = useWallet();
+  const { activeAccount, activeWallet, transactionSigner } = useWallet();
   const { signTransactionGroup } = usePrivyEasyStart();
   const { toast } = useToast();
+  const consumerCopy = useConsumerCopy();
+  const queryClient = useQueryClient();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [amountIn, setAmountIn] = useState("");
   const [swapping, setSwapping] = useState(false);
@@ -305,6 +328,7 @@ const SwapCard = ({
     amount: amountIn,
     fromDecimals: fromAsset?.decimals ?? 6,
     toDecimals: toAsset?.decimals ?? 6,
+    address: swapAddress,
     enabled: supported && Boolean(fromAsset && toAsset),
   });
 
@@ -379,27 +403,64 @@ const SwapCard = ({
       return;
     }
 
+    const amountOutHuman = quote.amountOutHuman ?? "";
+    const walletName = activeWallet?.metadata?.name || "your wallet";
+    toast({
+      title: consumerCopy ? "Confirm" : "Please Sign Transaction",
+      description: consumerCopy
+        ? "Confirm this swap."
+        : `Approve the swap in ${walletName}.`,
+      duration: 12_000,
+    });
+
     setSwapping(true);
     onSigningChange?.(true);
     try {
       const client = createHaystackRouterClient(networkId);
       if (!client) throw new Error("Haystack Router unavailable");
-      const swap = await client.newSwap({
+      const executableQuote = await quoteWithOutputAssetOptIn({
+        client,
         quote: quote.quote,
+        address: swapAddress,
+        fromASAID: fromAsset.assetId,
+        toASAID: toAsset.assetId,
+        amount: quote.quote.amount,
+      });
+      const swap = await client.newSwap({
+        quote: executableQuote,
         address: swapAddress,
         signer,
         slippage,
       });
+      await swap.sign();
+      onSigningChange?.(false);
+      onAwaitingConfirmation?.();
       const result = await swap.execute();
-      toast({
-        title: "Swap submitted",
-        description: `Confirmed in round ${result.confirmedRound.toString()}`,
+      const txId =
+        pickSwapTxIdFromComposer(result, swap) ?? result.txIds?.[0] ?? "";
+      void queryClient.invalidateQueries({ queryKey: ["swapBalance"] });
+      onSwapped?.({
+        txId,
+        amountIn,
+        amountOut: amountOutHuman,
+        fromSymbol: fromAsset.symbol,
+        fromIcon: fromAsset.logoPath,
+        toSymbol: toAsset.symbol,
+        toIcon: toAsset.logoPath,
       });
-      setAmountIn("");
-      onSwapped?.(result.confirmedRound.toString());
+      toast({
+        title: "Swap confirmed",
+        description: `Swapped ${amountIn} ${fromAsset.symbol} for ${amountOutHuman} ${toAsset.symbol}.`,
+      });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Swap failed";
-      toast({ title: "Swap failed", description: msg, variant: "destructive" });
+      onSwapFailed?.();
+      const { userRejected, message } = getTransactionErrorFeedback(e);
+      toast({
+        title: userRejected ? "Swap cancelled" : "Swap failed",
+        description: message,
+        variant: "destructive",
+        duration: 14_000,
+      });
     } finally {
       onSigningChange?.(false);
       setSwapping(false);

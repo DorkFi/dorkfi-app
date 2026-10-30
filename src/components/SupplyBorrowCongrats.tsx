@@ -6,11 +6,13 @@ import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 
 interface SupplyBorrowCongratsProps {
-  transactionType: "deposit" | "borrow" | "withdraw" | "repay";
+  transactionType: "deposit" | "borrow" | "withdraw" | "repay" | "swap";
   asset: string;
   assetIcon: string;
   /** Underlying pair icons for LP markets (preferred over `assetIcon` when set). */
   assetPairIcons?: { asset1Icon: string; asset2Icon: string };
+  /** Swap input asset; when set, the details row shows From → To. */
+  swapFrom?: { symbol: string; icon: string; amount?: string };
   amount: string;
   onViewTransaction: () => void;
   onGoToPortfolio: () => void;
@@ -30,6 +32,7 @@ const MAKE_ANOTHER_LABEL: Record<
   deposit: "Make another deposit",
   withdraw: "Make another withdrawal",
   repay: "Make another repay",
+  swap: "Make another swap",
 };
 
 function formatPacificDateTime(date: Date): string {
@@ -58,6 +61,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   asset,
   assetIcon,
   assetPairIcons,
+  swapFrom,
   amount,
   onViewTransaction,
   onGoToPortfolio,
@@ -78,6 +82,8 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         return { action: "withdrew", preposition: "from" };
       case "repay":
         return { action: "repaid", preposition: "to" };
+      case "swap":
+        return { action: "swapped", preposition: "for" };
       default:
         return { action: "processed", preposition: "with" };
     }
@@ -87,7 +93,19 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   const displayAsset = consumerCopy
     ? consumerAssetDisplayLabel(asset)
     : asset;
+  const displayFrom = swapFrom
+    ? consumerCopy
+      ? consumerAssetDisplayLabel(swapFrom.symbol)
+      : swapFrom.symbol
+    : null;
   const assetLabel = assetPairIcons ? `${displayAsset} LP` : displayAsset;
+  const swapFromAmount = swapFrom?.amount?.trim() || "";
+  const defiSwapSummary =
+    transactionType === "swap" && displayFrom
+      ? swapFromAmount
+        ? `${swapFromAmount} ${displayFrom} for ${amount} ${assetLabel}`
+        : `${amount} ${assetLabel}`
+      : null;
 
   if (consumerCopy) {
     return (
@@ -112,9 +130,29 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
 
         <div className="mt-6 w-full overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <span className="text-sm text-slate-500">Asset</span>
+            <span className="text-sm text-slate-500">
+              {transactionType === "swap" ? "Swap" : "Asset"}
+            </span>
             <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
-              {assetPairIcons ? (
+              {swapFrom && displayFrom ? (
+                <>
+                  <img
+                    src={swapFrom.icon}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                  {displayFrom}
+                  <span className="text-slate-400" aria-hidden>
+                    →
+                  </span>
+                  <img
+                    src={assetIcon}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover"
+                  />
+                  {assetLabel}
+                </>
+              ) : assetPairIcons ? (
                 <LpPairIconStack
                   asset1Icon={assetPairIcons.asset1Icon}
                   asset2Icon={assetPairIcons.asset2Icon}
@@ -129,7 +167,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
                   className="h-5 w-5 rounded-full object-cover"
                 />
               )}
-              {assetLabel}
+              {swapFrom ? null : assetLabel}
             </span>
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
@@ -196,9 +234,9 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
       <div className="text-center text-base text-slate-700 dark:text-slate-200 mb-2 font-medium">
         You successfully {action}{" "}
         <span className="text-whale-gold">
-          {amount} {assetLabel}
+          {defiSwapSummary ?? `${amount} ${assetLabel}`}
         </span>
-        {` ${preposition} the protocol.`}
+        {transactionType === "swap" ? "." : ` ${preposition} the protocol.`}
       </div>
 
       {aboveActions}
