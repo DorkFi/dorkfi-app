@@ -1,4 +1,5 @@
 import { decodeAddress } from "algosdk";
+import { X_SHARE_API_DEFAULT_ORIGIN } from "@/services/xShareService";
 
 export type OfframpHealth = {
   ok: boolean;
@@ -40,6 +41,10 @@ export type CoinbaseSellTx = {
 function offrampBase(): string {
   const raw = import.meta.env.VITE_OFFRAMP_API_BASE as string | undefined;
   if (raw && raw.trim()) return raw.replace(/\/+$/, "");
+  // The static app cannot serve /api/offramp. Production uses the share server.
+  if (import.meta.env.PROD) {
+    return `${X_SHARE_API_DEFAULT_ORIGIN}/api/offramp`;
+  }
   return "/api/offramp";
 }
 

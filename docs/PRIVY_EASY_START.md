@@ -17,7 +17,7 @@ Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC*
 | Variable | Required | Description |
 | --- | --- | --- |
 | `VITE_PRIVY_APP_ID` | No | Privy dashboard app ID (falls back to the baked-in DorkFi app id) |
-| `VITE_ENABLE_PRIVY_ONBOARDING` | No | `true` / `1` to enable in production; `false` / `0` to force off. **beta.dork.fi** auto-enables without this. |
+| `VITE_ENABLE_PRIVY_ONBOARDING` | No | `true` / `1` to enable in production; `false` / `0` to force off. **app.dork.fi** auto-enables without this. |
 | `VITE_MOONPAY_API_KEY` | For MoonPay sell | Publishable MoonPay key (`pk_test_…` / `pk_live_…`) |
 | `MOONPAY_SECRET_KEY` | For MoonPay sell | Server-only secret for widget URL signing |
 | `CDP_API_KEY_ID` | For Coinbase Onramp + Offramp | Coinbase Developer Platform secret API key id |
@@ -27,7 +27,7 @@ Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC*
 | `SPONSOR_ENABLED` | For sponsor | `true` to send dust Base ETH + Algorand ALGO to new Easy Start wallets |
 | `SPONSOR_ETH_PRIVATE_KEY` | For sponsor | Dedicated Base treasury private key (never `VITE_`) |
 | `SPONSOR_ALGO_MNEMONIC` | For sponsor | Dedicated Algorand 25-word mnemonic |
-| `VITE_OFFRAMP_API_BASE` | No | Defaults to `/api/offramp` (Vite plugin in dev). Point at your API in production. |
+| `VITE_OFFRAMP_API_BASE` | No | Defaults to `/api/offramp` in dev. Production defaults to the DorkFi share server `/api/offramp`. |
 | `VITE_OFFRAMP_REDIRECT_URL` | No | Coinbase Offramp redirect (allowlist in CDP). Defaults to `{origin}/portfolio`. |
 | `XO_SWAP_APP_NAME` | For USDC move | Exodus XO Swap partner `App-Name` (server-only) |
 | `XO_SWAP_APP_VERSION` | No | Defaults to `1.0.0` |
@@ -35,7 +35,7 @@ Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC*
 | `XO_SWAP_API_BASE` | No | Defaults to `https://exchange.exodus.io` |
 | `VITE_XO_SWAP_API_BASE` | No | Defaults to `/api/xo-swap` (Vite plugin in dev). Point at your API in production. |
 
-In local development, Easy Start defaults on. On **https://beta.dork.fi** it also auto-enables (see `PRIVY_AUTO_ENABLE_ORIGINS`). Production (`app.dork.fi`) still needs `VITE_ENABLE_PRIVY_ONBOARDING=true` (or the config feature flag) until you choose to roll it out.
+In local development, Easy Start defaults on. **https://app.dork.fi** also auto-enables (see `PRIVY_AUTO_ENABLE_ORIGINS`). Other production hosts stay off until `VITE_ENABLE_PRIVY_ONBOARDING=true`.
 
 ### Off-ramp API (dev)
 
@@ -46,7 +46,7 @@ The Vite plugin `plugins/offrampApiPlugin.ts` serves:
 - `GET /api/offramp/coinbase/status/:partnerUserRef` (same Bearer token)
 - `POST /api/offramp/moonpay/sign` (same Bearer token)
 
-Put CDP / MoonPay **secrets in `.env`** (not `VITE_*`). Restart `npm run dev` after changing them. For production, mount the same handlers from `server/offramp/handlers.ts` on your API and set `VITE_OFFRAMP_API_BASE`.
+Put CDP / MoonPay **secrets in `.env`** (not `VITE_*`). Restart `npm run dev` after changing them. Production mounts the same handlers on the share server (`server/index.ts` → `/api/offramp`). The production app calls that host unless `VITE_OFFRAMP_API_BASE` is set.
 
 Session-token routes refuse unauthenticated callers so only a signed-in Get Started user can mint a Coinbase Onramp/Offramp session.
 
@@ -128,7 +128,7 @@ Native wallet sessions take precedence over Privy when both could apply.
 
 ## Rollback
 
-Set `VITE_ENABLE_PRIVY_ONBOARDING=false` (forces off even on beta), or remove the origin from `PRIVY_AUTO_ENABLE_ORIGINS` / set `enablePrivyOnboarding: false` in config. No migration required.
+Set `VITE_ENABLE_PRIVY_ONBOARDING=false` (forces off even on app.dork.fi), or remove the origin from `PRIVY_AUTO_ENABLE_ORIGINS` / set `enablePrivyOnboarding: false` in config. No migration required.
 
 ## Phase 5 — On-chain signing (shipped)
 
@@ -143,7 +143,7 @@ Synthetic wallet id: `privy-easy-start` (treated like RainbowKit xChain for netw
 ## Not in scope (follow-ups)
 - Profile setup (preferred name, avatar)
 - Voi / Voi bridge
-- Production hosting of `/api/offramp`, `/api/xo-swap`, and `/api/easy-start` outside Vite (SimplFi `server/index.ts` already mounts them)
+- Production hosting of `/api/xo-swap` and `/api/easy-start` outside Vite (`/api/offramp` is mounted on the DorkFi share server)
 - RainbowKit `XchainUsdcBridgeControls` still uses the legacy Allbridge dialog — migrate separately
 
 See implementation plan in team docs for full phasing.

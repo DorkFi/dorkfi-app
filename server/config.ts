@@ -27,7 +27,11 @@ function resolveFrontendOrigins(): string[] {
       .filter(Boolean);
   }
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-    return [APP_FRONTEND_ORIGIN, "https://beta.dork.fi"];
+    return [
+      APP_FRONTEND_ORIGIN,
+      "https://www.app.dork.fi",
+      "https://beta.dork.fi",
+    ];
   }
   return ["http://localhost:8080"];
 }

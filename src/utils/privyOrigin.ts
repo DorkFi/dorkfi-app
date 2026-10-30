@@ -14,7 +14,10 @@ export const PRIVY_ALLOWED_ORIGINS = [
 ] as const;
 
 /** Origins where Easy Start is on without `VITE_ENABLE_PRIVY_ONBOARDING`. */
-export const PRIVY_AUTO_ENABLE_ORIGINS = ["https://beta.dork.fi"] as const;
+export const PRIVY_AUTO_ENABLE_ORIGINS = [
+  "https://app.dork.fi",
+  "https://www.app.dork.fi",
+] as const;
 
 /**
  * Public Privy app id (client-safe). Override with `VITE_PRIVY_APP_ID` when needed.
@@ -39,7 +42,7 @@ export function getPrivyAppId(): string {
  * - `VITE_ENABLE_PRIVY_ONBOARDING=false|0` always disables
  * - `true|1` always enables
  * - DEV defaults on
- * - `beta.dork.fi` auto-enables for testing without host env
+ * - `app.dork.fi` auto-enables without a host env flag
  * - otherwise uses the config feature flag (default off)
  */
 export function resolvePrivyOnboardingEnabled(
