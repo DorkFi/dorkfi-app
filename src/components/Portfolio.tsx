@@ -8,7 +8,10 @@ import {
 } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import { EasyStartFundingStrip } from "@/components/portfolio/EasyStartFundingStrip";
+import { ConnectedWalletActions } from "@/components/portfolio/ConnectedWalletActions";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useAddressName } from "@/hooks/useAddressName";
 import { useAvatarImage } from "@/hooks/useAvatarImage";
@@ -141,6 +144,7 @@ import {
   calculateUserHealthFactor,
   normalizeLiquidationThresholdToDecimal,
 } from "@/utils/userHealth";
+import { parsePoolGlobalUsd } from "@/utils/portfolioDisplayHealthFactor";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
@@ -528,7 +532,13 @@ function PortfolioAssetListPagination({
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
   const navigate = useNavigate();
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const {
+    activeAccount,
+    signTransactions,
+    activeWallet,
+    isPrivyEasyStartSession,
+  } = useDorkFiWalletAdapter();
+  const privyEasyStart = usePrivyEasyStart();
   const { currentNetwork } = useNetwork();
   const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
   const queryClient = useQueryClient();
@@ -1077,7 +1087,7 @@ const Portfolio = () => {
           }
 
           // Fetch both deposit and borrow balances for this token
-          const [depositBalance, borrowData] = await Promise.all([
+          const [depositData, borrowData] = await Promise.all([
             fetchUserDepositBalance(
               userAddress,
               token.poolId,
@@ -1092,7 +1102,8 @@ const Portfolio = () => {
             ),
           ]);
 
-          // Extract borrow balance and interest from the new return type
+          // Extract deposit / borrow balance and interest
+          const depositBalance = depositData?.balance || 0;
           const borrowBalance = borrowData?.balance || 0;
           const borrowInterest = borrowData?.interest || 0;
 
@@ -2069,13 +2080,9 @@ const Portfolio = () => {
               // Global user data values are scaled by 1e12, so divide to get USD
               // This comes from the global user state of the appId (pool)
               poolCollateralValueUSD =
-                Number(
-                  BigInt(poolGlobalData.totalCollateralValue) / BigInt(1e12)
-                ) || 0;
+                parsePoolGlobalUsd(poolGlobalData.totalCollateralValue) || 0;
               poolBorrowsUSD =
-                Number(
-                  BigInt(poolGlobalData.totalBorrowValue) / BigInt(1e12)
-                ) || 0;
+                parsePoolGlobalUsd(poolGlobalData.totalBorrowValue) || 0;
 
               riskRatio =
                 (poolCollateralValueUSD * liquidationFactorNum) /
@@ -2161,12 +2168,8 @@ const Portfolio = () => {
         let collateral = 0;
         let borrow = 0;
         try {
-          collateral = Number(
-            BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
-          );
-          borrow = Number(
-            BigInt(String(rec.totalBorrowValue ?? 0)) / BigInt(1e12)
-          );
+          collateral = parsePoolGlobalUsd(rec.totalCollateralValue);
+          borrow = parsePoolGlobalUsd(rec.totalBorrowValue);
         } catch {
           continue;
         }
@@ -2276,12 +2279,8 @@ const Portfolio = () => {
       let collateral = 0;
       let borrow = 0;
       try {
-        collateral = Number(
-          BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
-        );
-        borrow = Number(
-          BigInt(String(rec.totalBorrowValue ?? 0)) / BigInt(1e12)
-        );
+        collateral = parsePoolGlobalUsd(rec.totalCollateralValue);
+        borrow = parsePoolGlobalUsd(rec.totalBorrowValue);
       } catch {
         continue;
       }
@@ -4106,32 +4105,20 @@ const Portfolio = () => {
         "[Portfolio] User data globalUserData:",
         user.globalUserData
       );
-      const globalCollateralValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) => {
-            try {
-              return BigInt(String(item.totalCollateralValue ?? 0).split(".")[0]);
-            } catch {
-              return BigInt(0);
-            }
-          })
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
+      const globalCollateralValue = user.globalUserData.reduce(
+        (acc: number, item: Record<string, unknown>) =>
+          acc + parsePoolGlobalUsd(item.totalCollateralValue),
+        0
+      );
       console.log(
         "[Portfolio] Global collateral value:",
         globalCollateralValue
       );
-      const globalBorrowValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) => {
-            try {
-              return BigInt(String(item.totalBorrowValue ?? 0).split(".")[0]);
-            } catch {
-              return BigInt(0);
-            }
-          })
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
+      const globalBorrowValue = user.globalUserData.reduce(
+        (acc: number, item: Record<string, unknown>) =>
+          acc + parsePoolGlobalUsd(item.totalBorrowValue),
+        0
+      );
       console.log("[Portfolio] Global borrow value:", globalBorrowValue);
       const globalNetPortfolioValue = globalCollateralValue - globalBorrowValue;
       console.log(
@@ -4150,12 +4137,8 @@ const Portfolio = () => {
 
       user.globalUserData.forEach((item: Record<string, unknown>) => {
         const network = String(item.network || "unknown");
-        const collateralValue = Number(
-          BigInt(String(item.totalCollateralValue ?? 0)) / BigInt(1e12)
-        );
-        const borrowValue = Number(
-          BigInt(String(item.totalBorrowValue ?? 0)) / BigInt(1e12)
-        );
+        const collateralValue = parsePoolGlobalUsd(item.totalCollateralValue);
+        const borrowValue = parsePoolGlobalUsd(item.totalBorrowValue);
         const netValue = collateralValue - borrowValue;
 
         if (!networkValues[network]) {
@@ -5807,25 +5790,35 @@ const Portfolio = () => {
     );
   }
 
-  // Show no wallet connected state (skip when viewing another address via /portfolio/:address)
+  const easyStartPending =
+    isPrivyEasyStartSession ||
+    (privyEasyStart.authenticated && Boolean(privyEasyStart.evmAddress));
+
+  // Show no wallet connected state (skip when viewing another address via /portfolio/:address).
+  // Easy Start may still show Base USDC while the Algorand address derives.
   if (!displayAddress) {
     return (
       <div className="space-y-6">
-        {/* Connect Wallet Card */}
+        {easyStartPending ? <EasyStartFundingStrip /> : null}
         <DorkFiCard className="text-center p-8">
           <div className="space-y-4">
             <h2 className="text-2xl font-bold text-slate-800 dark:text-white">
-              Connect Your Wallet
+              {easyStartPending
+                ? "Preparing Algorand account"
+                : "Connect Your Wallet"}
             </h2>
             <p className="text-muted-foreground">
-              Connect your wallet to access your portfolio data and manage your
-              lending positions.
+              {easyStartPending
+                ? "Lending positions appear here once your Algorand xChain address is ready. You can still add USDC on Base and bridge in the meantime."
+                : "Connect your wallet to access your portfolio data and manage your lending positions."}
             </p>
-            <div className="pt-4">
-              <p className="text-sm text-muted-foreground">
-                Use the wallet button in the top navigation to connect.
-              </p>
-            </div>
+            {!easyStartPending ? (
+              <div className="pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Use the wallet button in the top navigation to connect.
+                </p>
+              </div>
+            ) : null}
           </div>
         </DorkFiCard>
       </div>
@@ -5873,6 +5866,13 @@ const Portfolio = () => {
           </div>
         </div>
       )}
+      {easyStartPending && <EasyStartFundingStrip />}
+      {!easyStartPending &&
+      currentNetwork === "algorand-mainnet" &&
+      activeAccount?.address &&
+      activeAccount.address === displayAddress ? (
+        <ConnectedWalletActions />
+      ) : null}
 
       {/* Render health factor section after avatar check is complete */}
       {isAvatarResolved &&

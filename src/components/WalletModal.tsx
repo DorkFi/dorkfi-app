@@ -6,11 +6,22 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Wallet, CheckCircle, ExternalLink } from "lucide-react";
+import { ChevronLeft, Wallet, ExternalLink, Mail } from "lucide-react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getNetworkConfig, isAVMNetwork, isEVMNetwork } from "@/config";
+import {
+  getEnabledNetworks,
+  getNetworkConfig,
+  getNetworkDisplayName,
+  isAVMNetwork,
+  isEVMNetwork,
+  type NetworkId,
+} from "@/config";
+import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import { afterOverlayClose, useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { cn } from "@/lib/utils";
 
 interface WalletModalProps {
   isOpen: boolean;
@@ -30,17 +41,53 @@ interface WalletProvider {
 const CONNECTION_TIMEOUT = 60000;
 
 const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
-  const { wallets, activeAccount } = useWallet();
+  const { wallets } = useWallet();
   const { toast } = useToast();
-  const { currentNetwork } = useNetwork();
+  const { currentNetwork, switchNetwork, isSwitchingNetwork } = useNetwork();
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
+  const [pendingNetworkId, setPendingNetworkId] = useState<NetworkId | null>(
+    null
+  );
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const connectionAbortRef = useRef<AbortController | null>(null);
+  const privyEasyStart = usePrivyEasyStart();
+  const openEasyStartLogin = useEasyStartLogin();
+  const [isEasyStartLoading, setIsEasyStartLoading] = useState(false);
+  const [showWallets, setShowWallets] = useState(false);
 
-  // Get network configuration
-  const networkConfig = getNetworkConfig(currentNetwork);
+  const showGetStarted =
+    privyEasyStart.enabled &&
+    privyEasyStart.configured &&
+    !privyEasyStart.authenticated;
+
   const isAVM = isAVMNetwork(currentNetwork);
   const isEVM = isEVMNetwork(currentNetwork);
+  const enabledNetworks = getEnabledNetworks();
+  const showNetworkSelector = enabledNetworks.length > 1;
+
+  const handleNetworkSelect = async (networkId: NetworkId) => {
+    if (isSwitchingNetwork || pendingNetworkId || networkId === currentNetwork) {
+      return;
+    }
+    setPendingNetworkId(networkId);
+    try {
+      await switchNetwork(networkId);
+      const next = getNetworkConfig(networkId);
+      toast({
+        title: "Network Switched",
+        description: `Switched to ${next.name}. Choose a wallet to connect.`,
+      });
+    } catch (error) {
+      console.error("Failed to switch network:", error);
+      toast({
+        title: "Network Switch Failed",
+        description: "Failed to switch network. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingNetworkId(null);
+    }
+  };
 
   // Define wallet providers based on network type
   const getWalletProviders = (): WalletProvider[] => {
@@ -201,6 +248,8 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     if (!isOpen) {
       // Clear any ongoing connection state when modal closes
       setIsConnecting(null);
+      setPendingNetworkId(null);
+      setShowWallets(false);
       // Clear timeout if it exists
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -379,37 +428,122 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     window.open(downloadUrl, "_blank");
   };
 
+  const handleEasyStartEmail = async () => {
+    setIsEasyStartLoading(true);
+    try {
+      onClose();
+      await new Promise<void>((resolve) => afterOverlayClose(resolve));
+      await openEasyStartLogin();
+    } finally {
+      setIsEasyStartLoading(false);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-6 max-h-[90vh] overflow-y-auto relative">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 p-2 rounded-full bg-white/90 hover:bg-white"
-          aria-label="Close"
-        >
-          <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        <DialogHeader className="pb-4">
+        <DialogHeader className="pb-4 pr-8">
+          {showGetStarted && showWallets ? (
+            <button
+              type="button"
+              onClick={() => setShowWallets(false)}
+              className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back
+            </button>
+          ) : null}
           <DialogTitle className="text-xl font-semibold text-center">
-            Connect Wallet
+            {showGetStarted && !showWallets ? "Get Started" : "Connect Wallet"}
           </DialogTitle>
-          <p className="text-sm text-muted-foreground text-center">
-            Choose a wallet to connect to DorkFi on {networkConfig.name}
-          </p>
-          <div className="flex items-center justify-center mt-2">
-            <div className="px-3 py-1 rounded-full bg-ocean-teal/20 text-ocean-teal text-xs font-medium">
-              {isAVM
-                ? "AVM Network"
-                : isEVM
-                ? "EVM Network"
-                : "Unknown Network"}
-            </div>
-          </div>
+          {showGetStarted && !showWallets ? null : (
+            <p className="text-sm text-muted-foreground text-center">
+              Choose a wallet on {getNetworkDisplayName(currentNetwork)}
+            </p>
+          )}
         </DialogHeader>
 
+        {showGetStarted && !showWallets ? (
+          <div className="space-y-3 py-2">
+            <Button
+              type="button"
+              onClick={() => void handleEasyStartEmail()}
+              disabled={
+                isEasyStartLoading ||
+                (!privyEasyStart.login && !privyEasyStart.configured)
+              }
+              className="h-12 w-full rounded-xl bg-ocean-teal text-base font-semibold text-white hover:bg-ocean-teal/90"
+            >
+              {isEasyStartLoading ? (
+                <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Continue with email
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowWallets(true)}
+              className="h-12 w-full rounded-xl text-base font-semibold"
+            >
+              <Wallet className="mr-2 h-4 w-4" />
+              Connect wallet
+            </Button>
+          </div>
+        ) : (
         <div className="space-y-4 py-2">
+          {showNetworkSelector ? (
+            <div
+              className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1"
+              role="group"
+              aria-label="Network"
+            >
+              {enabledNetworks.map((networkId) => {
+                const isCurrent = networkId === currentNetwork;
+                const isPending = pendingNetworkId === networkId;
+                const busy = isSwitchingNetwork || pendingNetworkId != null;
+                return (
+                  <button
+                    key={networkId}
+                    type="button"
+                    onClick={() => void handleNetworkSelect(networkId)}
+                    disabled={busy}
+                    aria-pressed={isCurrent}
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                      isCurrent
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:bg-muted/60",
+                      busy && "cursor-wait",
+                      busy && !isCurrent && !isPending && "opacity-50"
+                    )}
+                  >
+                    <img
+                      src={getNetworkLogoPath(networkId)}
+                      alt=""
+                      className="h-4 w-4 shrink-0 rounded-full"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = "/placeholder.svg";
+                      }}
+                    />
+                    <span className="truncate">
+                      {getNetworkDisplayName(networkId)}
+                      {isPending ? "…" : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-center text-xs text-muted-foreground">
+              Wallets on {getNetworkDisplayName(currentNetwork)}
+            </p>
+          )}
+
           {walletProviders.map((provider) => (
             <div
               key={provider.id}
@@ -476,13 +610,15 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
             </div>
           ))}
         </div>
+        )}
 
-        <div className="pt-6 mt-4 border-t border-gray-200/50 dark:border-gray-700/50">
-          <p className="text-xs text-muted-foreground text-center">
-            By connecting a wallet, you agree to our Terms of Service and
-            Privacy Policy.
-          </p>
-        </div>
+        {showGetStarted && !showWallets ? null : (
+          <div className="pt-6 mt-4 border-t border-gray-200/50 dark:border-gray-700/50">
+            <p className="text-xs text-muted-foreground text-center">
+              By connecting, you agree to our Terms of Service and Privacy Policy.
+            </p>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -60,6 +60,7 @@ import {
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
 import { withRpcReadCache, invalidateRpcReadCache } from "@/utils/rpcReadCache";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { calcDepositReturn } from "@folks-finance/algorand-sdk";
 import {
   calculateDepositAPY,
@@ -1119,6 +1120,27 @@ export function collectPositionMarketKeys(
 }
 
 /**
+ * Live market snapshot for product APYs (Easy Savings Earn).
+ * Prefers on-chain `get_market` — same as the DorkFi G market modal — because GET
+ * `/market-data` can succeed with a stale store (`refreshQueued: false`).
+ * Falls back to the GET path if the contract read fails.
+ */
+export async function fetchLiveMarketInfo(
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<MarketInfo | null> {
+  const live = await fetchMarketInfo(
+    poolId,
+    marketId,
+    networkId,
+    "contract"
+  );
+  if (live) return live;
+  return fetchMarketInfo(poolId, marketId, networkId, "api");
+}
+
+/**
  * POST `/market-data/{network}/{appId}/{marketId}` so the API refreshes its chain snapshot.
  * Use before `fetchAllMarkets` when you want the GET path to reflect the latest on-chain state.
  */
@@ -2079,8 +2101,37 @@ export function impliedDebtFromScaledAndMarketIndex(
 }
 
 /**
- * Compute UI "accrued interest" delta from API user row + chain market borrow index.
+ * Redeemable underlying from nToken (ARC-200) shares when pool `get_user` is empty.
+ * nTokens are scaled shares; apply the market deposit index (or raw 6dp units if index is 0).
  */
+export function depositFromNTokenShares(
+  nTokenRaw: string,
+  marketDepositIndex: string,
+  decimals: number
+): { balance: number; interest: number } {
+  const shares = BigInt(nTokenRaw || "0");
+  if (shares === 0n) {
+    return { balance: 0, interest: 0 };
+  }
+  const marketIndex = BigInt(marketDepositIndex || "0");
+  if (marketIndex === 0n) {
+    return {
+      balance: Number(shares) / Math.pow(10, decimals),
+      interest: 0,
+    };
+  }
+  const converted = borrowDebtFromScaledAndIndices(
+    nTokenRaw,
+    "0",
+    marketDepositIndex,
+    decimals
+  );
+  return {
+    balance: converted.totalDebt,
+    interest: converted.indexIncrementAccrued,
+  };
+}
+
 export function impliedAccruedFromApiUserAndMarketIndex(
   scaledBorrows: string,
   userBorrowIndex: string,
@@ -2522,13 +2573,14 @@ export async function fetchBorrowPositionApiSnapshot(
 /**
  * Fetch user deposit balance for a specific market
  * This gets the user's scaled deposits from the lending pool contract
+ * Returns both the current deposit balance and accrued (earned) interest
  */
 export const fetchUserDepositBalance = async (
   userAddress: string,
   poolId: string,
   marketId: string,
   networkId: NetworkId
-): Promise<number | null> => {
+): Promise<{ balance: number; interest: number } | null> => {
   return withRpcReadCache(
     `userDeposit:${networkId}:${userAddress}:${poolId}:${marketId}`,
     () =>
@@ -2547,13 +2599,20 @@ const fetchUserDepositBalanceUncached = async (
   poolId: string,
   marketId: string,
   networkId: NetworkId
-): Promise<number | null> => {
+): Promise<{ balance: number; interest: number } | null> => {
   try {
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const tokens = getAllTokensWithDisplayInfo(networkId);
+      const token = tokens.find(
+        (t) =>
+          t.underlyingContractId === marketId &&
+          String(t.poolId ?? "") === String(poolId)
       );
 
       const ci = new CONTRACT(
@@ -2569,89 +2628,188 @@ const fetchUserDepositBalanceUncached = async (
         }
       );
 
-      // Get user's position data from the lending pool contract
-      ci.setFee(2000);
-      const userDataR = await ci.get_user(userAddress, Number(marketId));
-      console.log(`get_user response for market ${marketId}:`, userDataR);
+      // Get user's position data from the lending pool contract.
+      // Easy Start accounts often aren't opted into the pool, so get_user can
+      // throw — still fall through to the nToken ARC-200 read.
+      let userDataR: { success?: boolean; returnValue?: unknown } | null = null;
+      try {
+        ci.setFee(2000);
+        userDataR = await ci.get_user(userAddress, Number(marketId));
+        console.log(`get_user response for market ${marketId}:`, userDataR);
+      } catch (error) {
+        console.warn(`get_user threw for market ${marketId}:`, error);
+      }
 
-      if (userDataR.success) {
+      if (userDataR?.success) {
         const userData = UserData(userDataR.returnValue);
         console.log(`User data for market ${marketId}:`, userData);
 
-        // Get token info to convert scaled deposits to actual amount
-        const tokens = getAllTokensWithDisplayInfo(networkId);
-        const token = tokens.find(
-          (t) =>
-            t.underlyingContractId === marketId &&
-            String(t.poolId ?? "") === String(poolId)
-        );
-
-        if (!token) {
-          console.warn(`Token not found for market ${marketId} pool ${poolId}`);
-          return null;
-        }
-
-        // Check if scaledDeposits exists and is valid
-        if (!userData.scaledDeposits) {
-          console.log(
-            `No deposits found for user ${userAddress} in market ${marketId}`
+        if (token && userData.scaledDeposits) {
+          // Get current market data to access deposit index (sync_market = accrued supply index)
+          const marketInfo = await fetchMarketInfo(
+            poolId,
+            marketId,
+            networkId,
+            "contract",
+            "sync_market"
           );
-          return 0; // Return 0 instead of null for no deposits
+          if (marketInfo) {
+            // Convert scaled deposits to actual token amount using deposit index scaling.
+            // Accrued = (scaled × (I_market − I_user)) / SCALE — same index split as borrows.
+            const scaledDeposits = userData.scaledDeposits.toString();
+            const userDepositIndex = userData.depositIndex.toString();
+            const currentDepositIndex = marketInfo.depositIndex;
+
+            const { totalDebt: balance, indexIncrementAccrued: interest } =
+              borrowDebtFromScaledAndIndices(
+                scaledDeposits,
+                userDepositIndex,
+                currentDepositIndex,
+                token.decimals
+              );
+
+            console.log(`User deposit balance for ${token.symbol}:`, {
+              scaledDeposits: scaledDeposits.toString(),
+              userDepositIndex: userDepositIndex.toString(),
+              currentDepositIndex: currentDepositIndex.toString(),
+              balance,
+              interest,
+              tokenDecimals: token.decimals,
+            });
+
+            return { balance, interest };
+          }
+          console.warn(
+            `Failed to get market info for market ${marketId}; trying nToken`
+          );
         }
-
-        // Get current market data to access deposit index (sync_market = accrued supply index)
-        const marketInfo = await fetchMarketInfo(
-          poolId,
-          marketId,
-          networkId,
-          "contract",
-          "sync_market"
-        );
-        if (!marketInfo) {
-          console.warn(`Failed to get market info for market ${marketId}`);
-          return null;
-        }
-
-        // Convert scaled deposits to actual token amount using deposit index scaling
-        const scaledDeposits = userData.scaledDeposits.toString();
-        const userDepositIndex = userData.depositIndex.toString();
-        const currentDepositIndex = marketInfo.depositIndex;
-
-        // Calculate actual deposits using the formula:
-        // actual_deposits = (scaled_deposits * current_deposit_index) / SCALE
-        const actualDepositsRaw =
-          BigInt(scaledDeposits) === 0n
-            ? 0n
-            : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
-            BigInt(1e18);
-
-        // Convert to human-readable format by accounting for token decimals
-        const actualDepositAmount =
-          Number(actualDepositsRaw) / Math.pow(10, token.decimals);
-
-        console.log(`User deposit balance for ${token.symbol}:`, {
-          scaledDeposits: scaledDeposits.toString(),
-          userDepositIndex: userDepositIndex.toString(),
-          currentDepositIndex: currentDepositIndex.toString(),
-          actualDepositsRaw: actualDepositsRaw.toString(),
-          actualDepositAmount,
-          tokenDecimals: token.decimals,
-        });
-
-        return actualDepositAmount;
-      } else {
+      } else if (userDataR) {
         console.warn(
           `Failed to get user data for market ${marketId}:`,
           userDataR
         );
-        return null;
       }
+
+      // Easy Start / xChain accounts can hold nToken shares in ARC-200 boxes
+      // without pool local state, so get_user looks empty while Earn is funded.
+      const nTokenIdHint = token
+        ? resolveTokenConfigFromDisplayToken(networkId, token)?.nTokenId
+        : undefined;
+      return await fetchDepositBalanceFromNTokenShares(
+        userAddress,
+        poolId,
+        marketId,
+        networkId,
+        clients,
+        token?.decimals ?? 6,
+        nTokenIdHint
+      );
     }
 
     return null;
   } catch (error) {
     console.error("Error fetching user deposit balance:", error);
     return null;
+  }
+};
+
+/**
+ * Read nToken ARC-200 balance and convert shares to underlying when get_user is empty.
+ */
+async function readArc200BoxBalanceRaw(
+  algod: algosdk.Algodv2,
+  nTokenId: string,
+  userAddress: string
+): Promise<string | null> {
+  try {
+    const pk = algosdk.decodeAddress(userAddress).publicKey;
+    const enc = new TextEncoder();
+    const names = [
+      new Uint8Array([...enc.encode("balances"), ...pk]),
+      new Uint8Array([...enc.encode("balance"), ...pk]),
+      pk,
+    ];
+    for (const name of names) {
+      try {
+        const box = await algod.getApplicationBoxByName(Number(nTokenId), name).do();
+        const raw = box.value;
+        if (!raw || raw.length === 0) continue;
+        let hex = "";
+        for (const b of raw) hex += Number(b).toString(16).padStart(2, "0");
+        return BigInt(`0x${hex}`).toString();
+      } catch {
+        continue;
+      }
+    }
+  } catch (error) {
+    console.warn(`nToken box read failed for ${nTokenId}:`, error);
+  }
+  return null;
+}
+
+const fetchDepositBalanceFromNTokenShares = async (
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId,
+  clients: Awaited<ReturnType<typeof algorandService.initializeClientsForReads>>,
+  decimals: number,
+  nTokenIdHint?: string
+): Promise<{ balance: number; interest: number } | null> => {
+  try {
+    let marketInfo: MarketInfo | null = null;
+    try {
+      marketInfo = await fetchMarketInfo(
+        poolId,
+        marketId,
+        networkId,
+        "contract",
+        "sync_market"
+      );
+    } catch (error) {
+      console.warn(
+        `fetchMarketInfo failed for nToken fallback on market ${marketId}:`,
+        error
+      );
+    }
+    const nTokenId = marketInfo?.ntokenId || nTokenIdHint;
+    if (!nTokenId) {
+      console.log(
+        `No nToken id for market ${marketId}; treating deposit as 0`
+      );
+      return { balance: 0, interest: 0 };
+    }
+
+    ARC200Service.initialize(clients);
+    let nTokenRaw = await ARC200Service.getBalance(userAddress, nTokenId);
+    if (!nTokenRaw || BigInt(nTokenRaw) === 0n) {
+      nTokenRaw = await readArc200BoxBalanceRaw(
+        clients.algod,
+        nTokenId,
+        userAddress
+      );
+    }
+    if (!nTokenRaw || BigInt(nTokenRaw) === 0n) {
+      return { balance: 0, interest: 0 };
+    }
+
+    const converted = depositFromNTokenShares(
+      nTokenRaw,
+      marketInfo?.depositIndex ?? "0",
+      marketInfo?.decimals ?? decimals
+    );
+    console.log(`User deposit from nToken ${nTokenId}:`, {
+      nTokenRaw,
+      depositIndex: marketInfo?.depositIndex,
+      ...converted,
+    });
+    return converted;
+  } catch (error) {
+    console.warn(
+      `nToken deposit fallback failed for market ${marketId}:`,
+      error
+    );
+    return { balance: 0, interest: 0 };
   }
 };
 
@@ -2667,18 +2825,18 @@ export const fetchUserWalletBalance = async (
   try {
     const networkConfig = getNetworkConfig(networkId);
     const tokens = getAllTokensWithDisplayInfo(networkId);
-    const token = tokens.find((t) => t.symbol === tokenSymbol);
+    const token =
+      tokens.find((t) => t.configKey === tokenSymbol) ??
+      tokens.find((t) => t.symbol === tokenSymbol) ??
+      tokens.find((t) => t.originalSymbol === tokenSymbol);
 
     if (!token) {
       console.warn(`Token not found for symbol ${tokenSymbol}`);
       return null;
     }
 
-    // Get the actual token config to access all properties
-    const tokenConfigRaw = getTokenConfig(networkId, tokenSymbol);
-    const tokenConfig = Array.isArray(tokenConfigRaw)
-      ? tokenConfigRaw[0]
-      : tokenConfigRaw;
+    // Resolve the specific market row (WAD/USDC exist on multiple pools).
+    const tokenConfig = resolveTokenConfigFromDisplayToken(networkId, token);
 
     if (!tokenConfig) {
       console.warn(`Token config not found for symbol ${tokenSymbol}`);
@@ -2712,13 +2870,31 @@ export const fetchUserWalletBalance = async (
         balance = (x => x >= BigInt(0) ? x : BigInt(0))(BigInt(accountInfo.amount) - BigInt(accountInfo.minBalance) - BigInt(1e6));
       } else if (
         tokenConfig.tokenStandard === "asa" ||
-        tokenConfig.tokenStandard === "asa-asa"
+        tokenConfig.tokenStandard === "asa-asa" ||
+        tokenConfig.tokenStandard === "arc200-exchange"
       ) {
-        // For ASA tokens, get balance from account asset information
-        const accountAssetInfo = await clients.algod
-          .accountAssetInformation(userAddress, Number(tokenConfig.assetId))
-          .do();
-        balance = BigInt(accountAssetInfo?.amount || 0)
+        // ASA holdings, including WAD (`arc200-exchange` wrapped as ASA 3334160924).
+        // algosdk v3 nests amount under assetHolding / asset-holding.
+        const assetId = Number(tokenConfig.assetId);
+        if (!Number.isFinite(assetId) || assetId <= 0) {
+          console.warn(
+            `Invalid assetId for ${tokenSymbol} (${tokenConfig.tokenStandard})`
+          );
+          return null;
+        }
+        try {
+          const accountAssetInfo = await clients.algod
+            .accountAssetInformation(userAddress, assetId)
+            .do();
+          balance =
+            getAccountAssetHoldingAmountAtomic(accountAssetInfo) ?? 0n;
+        } catch (error) {
+          console.error(
+            `Error fetching ASA balance for ${tokenSymbol}:`,
+            error
+          );
+          balance = 0n;
+        }
       } else if (
         tokenConfig.tokenStandard === "arc200" &&
         (tokenConfig.contractId || token.underlyingContractId)
@@ -3090,10 +3266,37 @@ const getMaxWithdrawableForMarketUncached = async (
       ci.get_market(Number(marketId)),
       ci.get_global_user(userAddress),
     ]);
-    if (!userDataR.success || !marketR.success || !globalUserR.success) return null;
-    const userData = UserData(userDataR.returnValue);
+    if (!marketR.success) return null;
     const m = decodeMarket(marketR.returnValue as RawMarket);
-    const globalData = GlobalUserData(globalUserR.returnValue);
+    let scaledDeposits = 0n;
+    if (userDataR.success) {
+      const userData = UserData(userDataR.returnValue);
+      scaledDeposits = BigInt(userData.scaledDeposits?.toString() ?? "0");
+    }
+    // Easy Start accounts can hold nToken shares without pool local state.
+    if (scaledDeposits === 0n) {
+      const nTokenId = m.ntokenId?.toString();
+      if (nTokenId && nTokenId !== "0") {
+        try {
+          ARC200Service.initialize(clients);
+          const nTokenRaw = await ARC200Service.getBalance(
+            userAddress,
+            nTokenId
+          );
+          if (nTokenRaw) {
+            scaledDeposits = BigInt(nTokenRaw);
+          }
+        } catch (error) {
+          console.warn(
+            `nToken max-withdraw fallback failed for market ${marketId}:`,
+            error
+          );
+        }
+      }
+    }
+    const globalData = globalUserR.success
+      ? GlobalUserData(globalUserR.returnValue)
+      : { totalCollateralValue: 0n, totalBorrowValue: 0n };
     const thisLt = m.liquidationThreshold;
     const thisCf = m.collateralFactor;
     /** Stricter bps = larger min collateral required = lower max withdraw. */
@@ -3109,7 +3312,7 @@ const getMaxWithdrawableForMarketUncached = async (
       divisorBps = thisLt > 0n ? thisLt : thisCf;
     }
     const result = getMaxWithdrawable(
-      { scaled_deposits: BigInt(userData.scaledDeposits?.toString() ?? "0") },
+      { scaled_deposits: scaledDeposits },
       {
         deposit_index: m.depositIndex,
         price: m.price,
@@ -3460,14 +3663,24 @@ export const withdraw = async (
       {
         const token_balanceR = await ciToken.arc200_balanceOf(userAddress);
         console.log("withdraw:token_balanceR (user)", { token_balanceR });
-        token_balance = BigInt(token_balanceR.returnValue);
+        if (
+          token_balanceR?.success &&
+          token_balanceR.returnValue != null
+        ) {
+          token_balance = BigInt(token_balanceR.returnValue);
+        }
       }
 
       let ntoken_balance = BigInt(0);
       {
         const ntoken_balanceR = await ciNToken.arc200_balanceOf(userAddress);
         console.log("withdraw:ntoken_balanceR (user)", { ntoken_balanceR });
-        ntoken_balance = BigInt(ntoken_balanceR.returnValue);
+        if (
+          ntoken_balanceR?.success &&
+          ntoken_balanceR.returnValue != null
+        ) {
+          ntoken_balance = BigInt(ntoken_balanceR.returnValue);
+        }
       }
 
       let folksDepositInterestIndex: bigint | null = null;
@@ -3598,6 +3811,18 @@ export const withdraw = async (
         );
 
         console.log("withdraw:initialUnderlyingR", { initialUnderlyingR });
+
+        if (
+          !initialUnderlyingR?.success ||
+          initialUnderlyingR.returnValue == null
+        ) {
+          throw new Error(
+            typeof initialUnderlyingR?.error === "string"
+              ? initialUnderlyingR.error
+              : initialUnderlyingR?.error?.message ||
+                  "Withdraw simulation failed (no underlying amount). Check amount and try again."
+          );
+        }
 
         underlying_amount = BigInt(initialUnderlyingR.returnValue);
         bestUnderlyingAmount = underlying_amount;
@@ -5546,10 +5771,22 @@ export const deposit = async (
       }
 
       if (!customTx.success) {
-        if (customTx.error.match(/tried to spend/)) {
-          throw new Error(customTx.error);
-        }
-        throw new Error("Deposit transaction failed");
+        // arccjs may set `error` to a simulation failureMessage string or an Error.
+        // Never swallow it — the opaque "Deposit transaction failed" hid root causes.
+        const raw = customTx?.error;
+        const errMsg =
+          typeof raw === "string"
+            ? raw
+            : raw instanceof Error
+              ? raw.message
+              : raw != null &&
+                  typeof (raw as { message?: unknown }).message === "string"
+                ? String((raw as { message: string }).message)
+                : raw != null
+                  ? String(raw)
+                  : "";
+        console.error("Deposit simulation failed:", errMsg || customTx);
+        throw new Error(errMsg || "Deposit transaction failed");
       }
 
       console.log("=== DEPOSIT SUCCESS ===");
@@ -7133,9 +7370,17 @@ export const repay = async (
             });
           }
         } else if (tokenStandard == "arc200-exchange") {
+          // WAD/sToken has arc200_redeem, not nt200 createBalanceBox.
+          // Extra ALGO on first redeem covers ARC200 min-balance.
+          const xaid = Number(token.underlyingAssetId);
+          if (!Number.isFinite(xaid) || xaid <= 0) {
+            throw new Error(
+              `arc200-exchange repay: missing ASA id for ${symbol}`
+            );
+          }
           const axfer = {
             aamt: repayArc200Units,
-            xaid: Number(token.underlyingAssetId),
+            xaid,
           };
           const txnO = (
             await builder.arc200Exchange.arc200_redeem(repayArc200Units)
@@ -7143,6 +7388,7 @@ export const repay = async (
           buildN.push({
             ...txnO,
             ...axfer,
+            payment: p1 > 0 ? 28501 : 0,
             note: new TextEncoder().encode("arc200_redeem"),
           });
         }
@@ -7180,10 +7426,18 @@ export const repay = async (
           const txnO = (
             await builder.lending.repay(Number(marketId), repayArc200Units)
           ).obj as any;
+          const foreignApps = [];
+          if (networkConfig.networkId === "voi-mainnet") {
+            foreignApps.push(47138065);
+          }
+          if (networkConfig.networkId === "algorand-mainnet") {
+            foreignApps.push(3333688254);
+          }
           buildN.push({
             ...txnO,
             payment: 1e5,
             note: new TextEncoder().encode("lending repay"),
+            foreignApps,
           });
         }
         ci.setEnableGroupResourceSharing(true);
@@ -7193,13 +7447,18 @@ export const repay = async (
           ci.setBeaconId(3209233839); // TODO move this to ulujs
         }
         customR = await ci.custom();
-        console.log("customR", { customR });
+        console.log("customR", { customR, p1, p2 });
         if (customR.success) {
           break;
         }
       }
       if (!customR.success) {
-        throw new Error("Failed to create repay transaction");
+        const errText = String(customR?.error ?? "").trim();
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Failed to create repay transaction"
+        );
       }
       return {
         success: true,
@@ -7487,15 +7746,22 @@ export const repayOnBehalf = async (
             });
           }
         } else if (tokenStandard == "arc200-exchange") {
+          const xaid = Number(token.underlyingAssetId);
+          if (!Number.isFinite(xaid) || xaid <= 0) {
+            throw new Error(
+              `arc200-exchange repayOnBehalf: missing ASA id for ${symbol}`
+            );
+          }
           const axfer = {
             aamt: bigAmount,
-            xaid: Number(token.underlyingAssetId),
+            xaid,
           };
           const txnO = (await builder.arc200Exchange.arc200_redeem(bigAmount))
             .obj;
           buildN.push({
             ...txnO,
             ...axfer,
+            payment: p1 > 0 ? 28501 : 0,
             note: new TextEncoder().encode("arc200_redeem"),
             description: "arc200_redeem",
           });
@@ -7554,7 +7820,12 @@ export const repayOnBehalf = async (
       }
       console.log("customR", { customR });
       if (!customR.success) {
-        throw new Error("Failed to create repayOnBehalf transaction");
+        const errText = String(customR?.error ?? "").trim();
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Failed to create repayOnBehalf transaction"
+        );
       }
       return {
         success: true,
@@ -7965,9 +8236,15 @@ export const repayAll = async (
             });
           }
         } else if (tokenStandard == "arc200-exchange") {
+          const xaid = Number(token.underlyingAssetId);
+          if (!Number.isFinite(xaid) || xaid <= 0) {
+            throw new Error(
+              `arc200-exchange repayAll: missing ASA id for ${symbol}`
+            );
+          }
           const axfer = {
             aamt: repayArc200Units,
-            xaid: Number(token.underlyingAssetId),
+            xaid,
           };
           const txnO = (
             await builder.arc200Exchange.arc200_redeem(repayArc200Units)
@@ -7976,6 +8253,7 @@ export const repayAll = async (
           buildN.push({
             ...txnO,
             ...axfer,
+            payment: p1 > 0 ? 28501 : 0,
             note: new TextEncoder().encode(description),
             description,
           });
@@ -8006,11 +8284,19 @@ export const repayAll = async (
             await builder.lending.repay_all(Number(marketId))
           ).obj as any;
           const description = "lending repay_all";
+          const foreignApps = [];
+          if (networkConfig.networkId === "voi-mainnet") {
+            foreignApps.push(47138065);
+          }
+          if (networkConfig.networkId === "algorand-mainnet") {
+            foreignApps.push(3333688254);
+          }
           buildN.push({
             ...txnO,
             payment: 1e5,
             note: new TextEncoder().encode(description),
             description,
+            foreignApps,
           });
         }
         ci.setEnableGroupResourceSharing(true);
@@ -8026,7 +8312,12 @@ export const repayAll = async (
         }
       }
       if (!customR.success) {
-        throw new Error("Failed to create repay transaction");
+        const errText = String(customR?.error ?? "").trim();
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Failed to create repay transaction"
+        );
       }
       return {
         success: true,
