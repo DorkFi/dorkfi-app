@@ -114,7 +114,7 @@ export function EasyStartFundingStrip() {
   const isLoading = algoAddress
     ? algoLoading && !algoTotal
     : privy.algorandAddressLoading || baseLoading;
-  const isError = Boolean(algoAddress) ? algoError : baseError;
+  const isError = algoAddress ? algoError : baseError;
   const isFetching = algoFetching || baseFetching;
 
   if (!privy.authenticated || !evmAddress) return null;
