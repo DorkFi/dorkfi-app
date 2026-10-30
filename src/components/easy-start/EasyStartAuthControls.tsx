@@ -6,6 +6,7 @@ import {
   CreditCard,
   ArrowDownToLine,
   ArrowLeftRight,
+  Waypoints,
   Loader2,
   UserRound,
 } from "lucide-react";
@@ -52,7 +53,7 @@ export function EasyStartButton() {
 
 export function EasyStartConnectMenu() {
   const privy = usePrivyEasyStart();
-  const { openDeposit, openWithdraw, openSwap } = useEasyStartModals();
+  const { openDeposit, openWithdraw, openSwap, openAramidBridge } = useEasyStartModals();
   const { formatCurrency } = useNumberI18n();
   const navigate = useNavigate();
   const { displayName, avatar } = useEasyStartUserProfile();
@@ -143,6 +144,10 @@ export function EasyStartConnectMenu() {
         <DropdownMenuItem onClick={openSwap}>
           <ArrowLeftRight className="mr-2 h-4 w-4" />
           Swap
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={openAramidBridge}>
+          <Waypoints className="mr-2 h-4 w-4" />
+          Bridge
         </DropdownMenuItem>
         <DropdownMenuItem onClick={openWithdraw}>
           <ArrowDownToLine className="mr-2 h-4 w-4" />

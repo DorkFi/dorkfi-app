@@ -19,6 +19,7 @@ import {
   Sparkles,
   ArrowDownToLine,
   ArrowLeftRight,
+  Waypoints,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAddressName } from "@/hooks/useAddressName";
@@ -69,9 +70,13 @@ const WalletNetworkButton = ({
     privyEasyStart.enabled && privyEasyStart.configured;
   const openEasyStartLogin = useEasyStartLogin();
   const consumerCopy = useConsumerCopy();
-  const { openDeposit, openSwap } = useEasyStartModals();
+  const { openDeposit, openSwap, openAramidBridge } = useEasyStartModals();
   const showWalletFunding =
     contextNetwork === "algorand-mainnet" &&
+    !privyEasyStart.authenticated;
+  const showWalletBridge =
+    (contextNetwork === "algorand-mainnet" ||
+      contextNetwork === "voi-mainnet") &&
     !privyEasyStart.authenticated;
 
   const handlePrivyEmailLogin = () => {
@@ -375,6 +380,15 @@ const WalletNetworkButton = ({
                   Swap
                 </DropdownMenuItem>
               </>
+            ) : null}
+            {showWalletBridge ? (
+              <DropdownMenuItem
+                onClick={openAramidBridge}
+                className="cursor-pointer"
+              >
+                <Waypoints className="w-4 h-4 mr-2" />
+                Bridge
+              </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
               onClick={handleCopyAddress}

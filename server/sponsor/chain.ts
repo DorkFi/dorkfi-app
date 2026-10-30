@@ -18,8 +18,10 @@ export type SponsorChain = {
   deriveAlgorandAddress: (evmAddress: string) => Promise<string>;
   fetchEthBalanceWei: (evmAddress: string) => Promise<bigint>;
   fetchAlgoSpendableMicro: (algoAddress: string) => Promise<bigint>;
+  fetchVoiSpendableMicro: (voiAddress: string) => Promise<bigint>;
   sendEth: (to: string, amountWei: bigint) => Promise<string>;
   sendAlgo: (to: string, amountMicro: bigint) => Promise<string>;
+  sendVoi: (to: string, amountMicro: bigint) => Promise<string>;
 };
 
 let xchainSdk: {
@@ -49,10 +51,8 @@ export async function deriveAlgorandXchainAddress(
   return addr;
 }
 
-function algodClient(env: SponsorEnv): Algodv2 {
-  const url = new URL(
-    env.algodUrl.includes("://") ? env.algodUrl : `https://${env.algodUrl}`
-  );
+function algodClient(rawUrl: string): Algodv2 {
+  const url = new URL(rawUrl.includes("://") ? rawUrl : `https://${rawUrl}`);
   const port = url.port || (url.protocol === "https:" ? "443" : "80");
   return new Algodv2("", `${url.protocol}//${url.hostname}`, port);
 }
@@ -68,11 +68,70 @@ function httpStatus(error: unknown): number | undefined {
   return undefined;
 }
 
+async function fetchSpendableMicro(
+  algod: Algodv2,
+  address: string
+): Promise<bigint> {
+  try {
+    const info = await algod.accountInformation(address).do();
+    return spendableAlgoMicroAlgosFromAccount(
+      info as {
+        amount?: unknown;
+        minBalance?: unknown;
+        "min-balance"?: unknown;
+      }
+    );
+  } catch (error) {
+    const status = httpStatus(error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (status === 404 || /not found|no such/i.test(message)) {
+      return 0n;
+    }
+    throw error;
+  }
+}
+
+async function sendNativeMicro(args: {
+  algod: Algodv2;
+  mnemonic: string;
+  to: string;
+  amountMicro: bigint;
+  missingKeyMessage: string;
+}): Promise<string> {
+  if (!args.mnemonic) {
+    throw new Error(args.missingKeyMessage);
+  }
+  const account = mnemonicToSecretKey(args.mnemonic);
+  const suggestedParams = await args.algod.getTransactionParams().do();
+  const sender =
+    typeof account.addr === "string" ? account.addr : account.addr.toString();
+  const feeMicro = sponsorPaymentFeeMicro(suggestedParams);
+  const treasurySpendable = await fetchSpendableMicro(args.algod, sender);
+  const shortfall = sponsorTreasuryShortfall({
+    spendableMicro: treasurySpendable,
+    amountMicro: args.amountMicro,
+    feeMicro,
+  });
+  if (shortfall) throw new Error(shortfall);
+  const txn = makePaymentTxnWithSuggestedParamsFromObject({
+    sender,
+    receiver: args.to,
+    amount: args.amountMicro,
+    suggestedParams,
+  });
+  const signed = txn.signTxn(account.sk);
+  const { txid } = await args.algod.sendRawTransaction(signed).do();
+  await waitForConfirmation(args.algod, txid, 8);
+  return txid;
+}
+
 export function createSponsorChain(env: SponsorEnv): SponsorChain {
   const publicClient = createPublicClient({
     chain: base,
     transport: http(env.ethRpc),
   });
+  const algoAlgod = algodClient(env.algodUrl);
+  const voiAlgod = algodClient(env.voiAlgodUrl);
 
   return {
     deriveAlgorandAddress: deriveAlgorandXchainAddress,
@@ -82,24 +141,11 @@ export function createSponsorChain(env: SponsorEnv): SponsorChain {
     },
 
     async fetchAlgoSpendableMicro(algoAddress: string) {
-      const algod = algodClient(env);
-      try {
-        const info = await algod.accountInformation(algoAddress).do();
-        return spendableAlgoMicroAlgosFromAccount(
-          info as {
-            amount?: unknown;
-            minBalance?: unknown;
-            "min-balance"?: unknown;
-          }
-        );
-      } catch (error) {
-        const status = httpStatus(error);
-        const message = error instanceof Error ? error.message : String(error);
-        if (status === 404 || /not found|no such/i.test(message)) {
-          return 0n;
-        }
-        throw error;
-      }
+      return fetchSpendableMicro(algoAlgod, algoAddress);
+    },
+
+    async fetchVoiSpendableMicro(voiAddress: string) {
+      return fetchSpendableMicro(voiAlgod, voiAddress);
     },
 
     async sendEth(to: string, amountWei: bigint) {
@@ -121,48 +167,23 @@ export function createSponsorChain(env: SponsorEnv): SponsorChain {
     },
 
     async sendAlgo(to: string, amountMicro: bigint) {
-      if (!env.algoMnemonic) {
-        throw new Error("Sponsor ALGO mnemonic is not configured");
-      }
-      const account = mnemonicToSecretKey(env.algoMnemonic);
-      const algod = algodClient(env);
-      const suggestedParams = await algod.getTransactionParams().do();
-      const sender =
-        typeof account.addr === "string"
-          ? account.addr
-          : account.addr.toString();
-      const feeMicro = sponsorPaymentFeeMicro(suggestedParams);
-      let treasurySpendable = 0n;
-      try {
-        const treasury = await algod.accountInformation(sender).do();
-        treasurySpendable = spendableAlgoMicroAlgosFromAccount(
-          treasury as {
-            amount?: unknown;
-            minBalance?: unknown;
-            "min-balance"?: unknown;
-          }
-        );
-      } catch (error) {
-        const status = httpStatus(error);
-        const message = error instanceof Error ? error.message : String(error);
-        if (status !== 404 && !/not found|no such/i.test(message)) throw error;
-      }
-      const shortfall = sponsorTreasuryShortfall({
-        spendableMicro: treasurySpendable,
+      return sendNativeMicro({
+        algod: algoAlgod,
+        mnemonic: env.algoMnemonic ?? "",
+        to,
         amountMicro,
-        feeMicro,
+        missingKeyMessage: "Sponsor ALGO mnemonic is not configured",
       });
-      if (shortfall) throw new Error(shortfall);
-      const txn = makePaymentTxnWithSuggestedParamsFromObject({
-        sender,
-        receiver: to,
-        amount: amountMicro,
-        suggestedParams,
+    },
+
+    async sendVoi(to: string, amountMicro: bigint) {
+      return sendNativeMicro({
+        algod: voiAlgod,
+        mnemonic: env.algoMnemonic ?? "",
+        to,
+        amountMicro,
+        missingKeyMessage: "Sponsor ALGO mnemonic is not configured",
       });
-      const signed = txn.signTxn(account.sk);
-      const { txid } = await algod.sendRawTransaction(signed).do();
-      await waitForConfirmation(algod, txid, 8);
-      return txid;
     },
   };
 }

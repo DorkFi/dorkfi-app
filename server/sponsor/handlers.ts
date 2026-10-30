@@ -1,5 +1,6 @@
 /**
- * Easy Start gas sponsor: dust ETH on Base + ALGO on the derived xChain address.
+ * Easy Start gas sponsor: dust ETH on Base, ALGO on the derived xChain
+ * address, and VOI on that same address so it can pay Voi fees.
  *
  * Env (server-only, never VITE_):
  *   SPONSOR_ENABLED=true
@@ -20,6 +21,7 @@ import {
   loadSponsorEnv,
   MIN_ALGORAND_ALGO_MICRO,
   MIN_BASE_ETH_WEI,
+  MIN_VOI_MICRO,
   type SponsorEnv,
 } from "./env.ts";
 import { sponsorSendErrorMessage } from "./spendable.ts";
@@ -43,6 +45,7 @@ export type SponsorResult = {
   algorandAddress: string | null;
   eth: SponsorLeg;
   algo: SponsorLeg;
+  voi: SponsorLeg;
 };
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -91,14 +94,16 @@ export async function runSponsorJob(
     algorandAddress: null,
     eth: { status: "skipped", reason: "already_funded" },
     algo: { status: "skipped", reason: "already_funded" },
+    voi: { status: "skipped", reason: "already_funded" },
   };
 
   const algorandAddress = await chain.deriveAlgorandAddress(evmAddress);
   result.algorandAddress = algorandAddress;
 
-  const [ethBal, algoSpendable] = await Promise.all([
+  const [ethBal, algoSpendable, voiSpendable] = await Promise.all([
     chain.fetchEthBalanceWei(evmAddress),
     chain.fetchAlgoSpendableMicro(algorandAddress),
+    chain.fetchVoiSpendableMicro(algorandAddress),
   ]);
 
   if (ethBal < MIN_BASE_ETH_WEI) {
@@ -129,6 +134,22 @@ export async function runSponsorJob(
       result.algo = {
         status: "error",
         error: sponsorSendErrorMessage(error, "Could not send ALGO"),
+      };
+    }
+  }
+
+  if (voiSpendable < MIN_VOI_MICRO) {
+    try {
+      const txHash = await chain.sendVoi(algorandAddress, env.voiMicro);
+      result.voi = { status: "sent", txHash };
+    } catch (error) {
+      console.error("[sponsor] VOI send failed", {
+        algorandAddress,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      result.voi = {
+        status: "error",
+        error: sponsorSendErrorMessage(error, "Could not send VOI"),
       };
     }
   }

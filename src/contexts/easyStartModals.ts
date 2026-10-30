@@ -5,6 +5,8 @@ export type EasyStartModalsContextValue = {
   openWithdraw: () => void;
   /** Algorand asset swap via Haystack, signed by the Privy embedded wallet. */
   openSwap: () => void;
+  /** Aramid bridge across Base, Algorand, and Voi. */
+  openAramidBridge: () => void;
   /** Advanced Base ↔ Algorand USDC move via XO Swap (escape hatch). */
   openBridge: () => void;
 };
@@ -23,6 +25,9 @@ export function useEasyStartModals(): EasyStartModalsContextValue {
         console.warn("EasyStartModalsProvider is not mounted");
       },
       openSwap: () => {
+        console.warn("EasyStartModalsProvider is not mounted");
+      },
+      openAramidBridge: () => {
         console.warn("EasyStartModalsProvider is not mounted");
       },
       openBridge: () => {

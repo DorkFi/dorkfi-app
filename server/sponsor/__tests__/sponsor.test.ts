@@ -66,6 +66,7 @@ describe("loadSponsorEnv", () => {
     expect(isSponsorLive(env)).toBe(false);
     expect(env.ethAmountWei).toBe(100_000_000_000_000n);
     expect(env.algoMicro).toBe(1_000_000n);
+    expect(env.voiMicro).toBe(1_000_000n);
   });
 
   it("is live only when enabled and keys are present", () => {
@@ -166,8 +167,10 @@ function mockChain(overrides: Partial<SponsorChain> = {}): SponsorChain {
     deriveAlgorandAddress: async () => "ALGORANDADDRESSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     fetchEthBalanceWei: async () => 0n,
     fetchAlgoSpendableMicro: async () => 0n,
+    fetchVoiSpendableMicro: async () => 0n,
     sendEth: async () => "0xeth",
     sendAlgo: async () => "algotx",
+    sendVoi: async () => "voitx",
     ...overrides,
   };
 }
@@ -190,6 +193,8 @@ describe("runSponsorJob", () => {
     expect(result.eth.txHash).toBe("0xeth");
     expect(result.algo.status).toBe("sent");
     expect(result.algo.txHash).toBe("algotx");
+    expect(result.voi.status).toBe("sent");
+    expect(result.voi.txHash).toBe("voitx");
     expect(result.algorandAddress).toBeTruthy();
   });
 
@@ -200,10 +205,12 @@ describe("runSponsorJob", () => {
       mockChain({
         fetchEthBalanceWei: async () => 50_000_000_000_000n,
         fetchAlgoSpendableMicro: async () => 100_000n,
+        fetchVoiSpendableMicro: async () => 100_000n,
       })
     );
     expect(result.eth).toEqual({ status: "skipped", reason: "already_funded" });
     expect(result.algo).toEqual({ status: "skipped", reason: "already_funded" });
+    expect(result.voi).toEqual({ status: "skipped", reason: "already_funded" });
   });
 
   it("records a send error without throwing", async () => {

@@ -54,6 +54,11 @@ const EasyStartSwapSheet = lazy(() =>
     default: m.EasyStartSwapSheet,
   }))
 );
+const AramidBridgeSheet = lazy(() =>
+  import("@/components/easy-start/AramidBridgeSheet").then((m) => ({
+    default: m.AramidBridgeSheet,
+  }))
+);
 const WalletAddMoneySheet = lazy(() =>
   import("@/components/easy-start/WalletAddMoneySheet").then((m) => ({
     default: m.WalletAddMoneySheet,
@@ -136,12 +141,14 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [swapOpen, setSwapOpen] = useState(false);
+  const [aramidOpen, setAramidOpen] = useState(false);
   const [bridgeOpen, setBridgeOpen] = useState(false);
   const [offrampResume, setOfframpResume] =
     useState<CoinbaseOfframpPending | null>(null);
 
   const openDeposit = useCallback(() => setDepositOpen(true), []);
   const openSwap = useCallback(() => setSwapOpen(true), []);
+  const openAramidBridge = useCallback(() => setAramidOpen(true), []);
   const openWithdraw = useCallback(() => {
     const pending = readCoinbaseOfframpPending();
     if (pending) setOfframpResume(pending);
@@ -159,9 +166,10 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
       openDeposit,
       openWithdraw,
       openSwap,
+      openAramidBridge,
       openBridge,
     }),
-    [openDeposit, openWithdraw, openSwap, openBridge]
+    [openDeposit, openWithdraw, openSwap, openAramidBridge, openBridge]
   );
 
   const showPrivySheets =
@@ -186,7 +194,7 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   return (
     <EasyStartModalsContext.Provider value={value}>
       {children}
-      {showSheets ? (
+      {(showSheets || aramidOpen) ? (
         <>
           {depositOpen ? (
             <IsolateErrorBoundary
@@ -254,6 +262,35 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                   open={swapOpen}
                   onOpenChange={setSwapOpen}
                   walletAddress={showWalletTools ? connectedAlgo : null}
+                />
+              </Suspense>
+            </IsolateErrorBoundary>
+          ) : null}
+          {aramidOpen ? (
+            <IsolateErrorBoundary
+              label="Bridge"
+              fallback={({ error, retry }) => (
+                <EasyStartSheetError
+                  open={aramidOpen}
+                  onOpenChange={setAramidOpen}
+                  title="Bridge"
+                  error={error}
+                  retry={retry}
+                />
+              )}
+            >
+              <Suspense
+                fallback={
+                  <EasyStartSheetFallback
+                    open={aramidOpen}
+                    onOpenChange={setAramidOpen}
+                    title="Bridge"
+                  />
+                }
+              >
+                <AramidBridgeSheet
+                  open={aramidOpen}
+                  onOpenChange={setAramidOpen}
                 />
               </Suspense>
             </IsolateErrorBoundary>

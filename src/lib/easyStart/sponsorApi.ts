@@ -14,6 +14,8 @@ export type SponsorResult = {
   algorandAddress: string | null;
   eth: SponsorLeg;
   algo: SponsorLeg;
+  /** Present once the sponsor API includes the Voi leg. */
+  voi?: SponsorLeg;
 };
 
 export class SponsorFundingError extends Error {

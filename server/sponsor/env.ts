@@ -1,5 +1,5 @@
 /**
- * Easy Start gas sponsor (Base ETH + Algorand ALGO).
+ * Easy Start gas sponsor (Base ETH, Algorand ALGO, and Voi VOI).
  * Server-only env — never prefix these with VITE_.
  *
  * Keep in sync with DEFAULT_PRIVY_APP_ID in src/utils/privyOrigin.ts
@@ -7,14 +7,18 @@
 const DEFAULT_PRIVY_APP_ID = "cmrfehwv300ix0ci8uh0tnm8q";
 const DEFAULT_ETH_RPC = "https://mainnet.base.org";
 const DEFAULT_ALGOD_URL = "https://mainnet-api.4160.nodely.dev";
+const DEFAULT_VOI_ALGOD_URL = "https://mainnet-api.voi.nodely.dev";
 
 /** Same floor as src/lib/easyStart/baseBalances.ts `MIN_BASE_ETH_WEI`. */
 export const MIN_BASE_ETH_WEI = 50_000_000_000_000n; // 0.00005 ETH
 /** Same floor as src/lib/easyStart/baseBalances.ts `MIN_ALGORAND_ALGO_MICRO`. */
 export const MIN_ALGORAND_ALGO_MICRO = 100_000n; // 0.1 ALGO
+/** Account minimum on Voi before a bridge payment can pay its fee. */
+export const MIN_VOI_MICRO = 100_000n; // 0.1 VOI
 
 const DEFAULT_ETH_AMOUNT_WEI = 100_000_000_000_000n; // 0.0001 ETH
 const DEFAULT_ALGO_MICRO = 1_000_000n; // 1 ALGO
+const DEFAULT_VOI_MICRO = 1_000_000n; // 1 VOI
 
 export type SponsorEnv = {
   enabled: boolean;
@@ -26,6 +30,9 @@ export type SponsorEnv = {
   algoMnemonic?: string;
   algoMicro: bigint;
   algodUrl: string;
+  /** Same ed25519 key as Algorand. Sent on Voi to the xChain address. */
+  voiMicro: bigint;
+  voiAlgodUrl: string;
 };
 
 export function parseBoolFlag(raw: string | undefined): boolean {
@@ -90,6 +97,10 @@ export function loadSponsorEnv(
       /\/+$/,
       ""
     ),
+    voiMicro: parsePositiveBigInt(env.SPONSOR_VOI_MICRO, DEFAULT_VOI_MICRO),
+    voiAlgodUrl: (
+      env.SPONSOR_VOI_ALGOD_URL?.trim() || DEFAULT_VOI_ALGOD_URL
+    ).replace(/\/+$/, ""),
   };
 }
 

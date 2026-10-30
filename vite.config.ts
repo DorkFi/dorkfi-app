@@ -6,6 +6,7 @@ import { haystackProxyPlugin } from "./vite/haystackProxyPlugin";
 import { offrampApiPlugin } from "./plugins/offrampApiPlugin";
 import { xoSwapApiPlugin } from "./plugins/xoSwapApiPlugin";
 import { sponsorApiPlugin } from "./plugins/sponsorApiPlugin";
+import { aramidConfigPlugin } from "./plugins/aramidConfigPlugin";
 
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
@@ -39,6 +40,8 @@ export default defineConfig(({ mode }) => {
     "SPONSOR_ALGO_MNEMONIC",
     "SPONSOR_ALGO_MICRO",
     "SPONSOR_ALGOD_URL",
+    "SPONSOR_VOI_MICRO",
+    "SPONSOR_VOI_ALGOD_URL",
   ] as const) {
     if (env[key] && !process.env[key]) process.env[key] = env[key];
   }
@@ -98,6 +101,7 @@ export default defineConfig(({ mode }) => {
     offrampApiPlugin(),
     xoSwapApiPlugin(),
     sponsorApiPlugin(),
+    aramidConfigPlugin(),
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),
