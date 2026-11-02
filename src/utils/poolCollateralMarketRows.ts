@@ -135,7 +135,8 @@ export async function fetchPoolCollateralMarketRowsForDeposit(
 
     if (tokens.length === 0) return [];
 
-    const balances: Array<number | null> = new Array(tokens.length).fill(null);
+    const balances: Array<{ balance: number; interest: number } | null> =
+      new Array(tokens.length).fill(null);
     await runWithConcurrency(tokens, 6, async (t, i) => {
       balances[i] = await fetchUserDepositBalance(
         userAddress,
@@ -145,7 +146,7 @@ export async function fetchPoolCollateralMarketRowsForDeposit(
       );
     });
 
-    const supplied = tokens.filter((_, i) => (balances[i] ?? 0) > 0);
+    const supplied = tokens.filter((_, i) => (balances[i]?.balance ?? 0) > 0);
     if (supplied.length === 0) return [];
 
     const infos = await Promise.all(

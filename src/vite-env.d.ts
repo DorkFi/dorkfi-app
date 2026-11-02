@@ -42,4 +42,20 @@ interface ImportMetaEnv {
   readonly VITE_X_SHARE_API_BASE?: string;
   /** Local share-server target for the Vite `/api/x-share` proxy (default `http://127.0.0.1:8788`). */
   readonly VITE_X_SHARE_LOCAL_TARGET?: string;
+  /** Privy app id for Easy Start email / social onboarding. */
+  readonly VITE_PRIVY_APP_ID?: string;
+  /** When `true` or `1`, show Get Started (Privy) alongside Connect Wallet. */
+  readonly VITE_ENABLE_PRIVY_ONBOARDING?: string;
+  /** Extra Privy allowed origins (comma-separated). Also add them in the Privy dashboard. */
+  readonly VITE_PRIVY_ALLOWED_ORIGINS?: string;
+  /** MoonPay publishable key (`pk_test_…` / `pk_live_…`) for Easy Start sell widget. */
+  readonly VITE_MOONPAY_API_KEY?: string;
+  /** Optional origin for off-ramp API (default `/api/offramp` via Vite plugin). */
+  readonly VITE_OFFRAMP_API_BASE?: string;
+  /** Redirect URL after Coinbase Offramp widget (must be allowlisted in CDP). */
+  readonly VITE_OFFRAMP_REDIRECT_URL?: string;
+  /** Optional origin for XO Swap proxy (default `/api/xo-swap` via Vite plugin). */
+  readonly VITE_XO_SWAP_API_BASE?: string;
+  /** Optional origin for Easy Start sponsor API (default `/api/easy-start`). */
+  readonly VITE_EASY_START_API_BASE?: string;
 }

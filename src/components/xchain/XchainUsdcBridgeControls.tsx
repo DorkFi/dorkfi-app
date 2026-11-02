@@ -7,7 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
-/** Allbridge chain symbols (see @d13co/algo-x-evm-ui bridgeSdk DEFAULT_RPC_URLS). */
+/**
+ * Legacy Allbridge chain symbols (see @d13co/algo-x-evm-ui bridgeSdk).
+ * Easy Start now uses XO Swap; this RainbowKit control still opens Allbridge UI.
+ */
 const BRIDGE_CHAIN_ALG = "ALG";
 const BRIDGE_CHAIN_BASE = "BAS";
 const BRIDGE_TOKEN_USDC = "USDC";
@@ -21,12 +24,12 @@ export interface XchainUsdcBridgeControlsProps {
 /** When true, xChain bridge controls (direction + Bridge USDC) are shown. */
 export function shouldShowXchainUsdcBridgeControls(
   currentNetwork: string,
-  activeWalletId: string | undefined
+  activeWalletId: string | undefined,
+  privyEasyStartActive = false
 ): boolean {
-  return (
-    currentNetwork === "algorand-mainnet" &&
-    (activeWalletId ?? "").toLowerCase() === "rainbowkit"
-  );
+  if (currentNetwork !== "algorand-mainnet") return false;
+  if ((activeWalletId ?? "").toLowerCase() === "rainbowkit") return true;
+  return privyEasyStartActive;
 }
 
 function XchainUsdcBridgeControlsInner({ className }: XchainUsdcBridgeControlsProps) {

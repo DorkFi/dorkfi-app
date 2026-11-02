@@ -1,0 +1,423 @@
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  PrivyProvider,
+  useLogin,
+  usePrivy,
+  useSignTypedData,
+  useWallets,
+} from "@privy-io/react-auth";
+import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
+import { base } from "viem/chains";
+import { isFeatureEnabled } from "@/config";
+import { deriveAlgorandXchainAddress } from "@/services/xchainAddressService";
+import {
+  signPrivyXchainTransactions,
+  signXchainTransactionGroup,
+} from "@/wallet/privyXchainSignTransactions";
+import type { Transaction } from "algosdk";
+import {
+  getPrivyAppId,
+  getPrivyOriginHint,
+  resolvePrivyOnboardingEnabled,
+} from "@/utils/privyOrigin";
+import {
+  DEFAULT_PRIVY_EASY_START_STATE,
+  PrivyEasyStartContext,
+  takeQueuedEasyStartLogin,
+  type PrivyEasyStartState,
+} from "@/contexts/privyEasyStartContext";
+import {
+  isSponsorFullyFunded,
+  requestEasyStartSponsor,
+} from "@/lib/easyStart/sponsorApi";
+
+const PRIVY_APP_ID = getPrivyAppId();
+
+/** User closed the Privy modal — not a login failure. */
+function isPrivyAuthDismissed(code: unknown): boolean {
+  return code === "exited_auth_flow" || code === "exited_update_flow";
+}
+
+function privyDisplayName(
+  user: ReturnType<typeof usePrivy>["user"]
+): string | null {
+  if (!user) return null;
+  return (
+    user.google?.name?.split(" ")[0] ??
+    user.email?.address?.split("@")[0] ??
+    null
+  );
+}
+
+function PrivyEasyStartStateBridge({
+  children,
+  onReadyStuck,
+}: {
+  children: ReactNode;
+  onReadyStuck?: () => void;
+}) {
+  const {
+    ready,
+    authenticated,
+    user,
+    logout,
+    error: privyError,
+    getAccessToken,
+  } = usePrivy();
+  const { toast } = useToast();
+  const { login: privyLogin } = useLogin({
+    onError: (code) => {
+      if (isPrivyAuthDismissed(code)) return;
+      console.error("[Easy Start] Privy login error", code);
+      toast({
+        title: "Get Started failed",
+        description: String(code),
+        variant: "destructive",
+      });
+    },
+  });
+  const { signTypedData } = useSignTypedData();
+  const { wallets } = useWallets();
+
+  const login = useCallback(
+    (options?: { loginMethods?: string[] }) => {
+      if (options?.loginMethods?.length) {
+        privyLogin(options);
+      } else {
+        privyLogin();
+      }
+    },
+    [privyLogin]
+  );
+
+  useEffect(() => {
+    const originHint = getPrivyOriginHint();
+    if (originHint) {
+      console.error("[Easy Start] Privy cannot init on this origin:", originHint);
+      return;
+    }
+    if (ready) return;
+    const t = window.setTimeout(() => {
+      console.warn(
+        "[Easy Start] Privy ready is still false after 8s. Hard-refresh this origin.",
+        { origin: window.location.origin }
+      );
+      onReadyStuck?.();
+    }, 8000);
+    return () => window.clearTimeout(t);
+  }, [ready, onReadyStuck]);
+
+  useEffect(() => {
+    if (!ready || !login) return;
+    if (takeQueuedEasyStartLogin()) {
+      try {
+        login();
+      } catch (error) {
+        console.error("[Easy Start] queued login() threw", error);
+      }
+    }
+  }, [ready, login]);
+
+  /** Survive Privy wallets[] blips (e.g. after Base chain switch). */
+  const [stableEvmAddress, setStableEvmAddress] = useState<string | null>(null);
+  const [stableAlgorandAddress, setStableAlgorandAddress] = useState<
+    string | null
+  >(null);
+
+  const liveWallet = useMemo(() => {
+    if (!ready || !authenticated) return null;
+    return (
+      wallets.find((w) => w.walletClientType === "privy") ?? wallets[0] ?? null
+    );
+  }, [authenticated, ready, wallets]);
+
+  const liveEvmAddress = liveWallet?.address ?? null;
+
+  useEffect(() => {
+    if (!authenticated) {
+      setStableEvmAddress(null);
+      setStableAlgorandAddress(null);
+      return;
+    }
+    if (liveEvmAddress) {
+      setStableEvmAddress(liveEvmAddress);
+    }
+  }, [authenticated, liveEvmAddress]);
+
+  const evmAddress = authenticated
+    ? liveEvmAddress ?? stableEvmAddress
+    : null;
+
+  const signTransactions = useCallback(
+    async (txns: Uint8Array[]) => {
+      if (!evmAddress) {
+        throw new Error("Easy Start wallet not ready");
+      }
+      return signPrivyXchainTransactions(evmAddress, txns, signTypedData);
+    },
+    [evmAddress, signTypedData]
+  );
+
+  const signTransactionGroup = useCallback(
+    async (txnGroup: Transaction[], indexesToSign: number[]) => {
+      if (!evmAddress) {
+        throw new Error("Easy Start wallet not ready");
+      }
+      return signXchainTransactionGroup(
+        evmAddress,
+        txnGroup,
+        indexesToSign,
+        signTypedData
+      );
+    },
+    [evmAddress, signTypedData]
+  );
+
+  const algorandQuery = useQuery({
+    queryKey: ["privy-xchain-address", evmAddress],
+    queryFn: () => deriveAlgorandXchainAddress(evmAddress!),
+    enabled: Boolean(authenticated && evmAddress),
+    staleTime: Infinity,
+    gcTime: 24 * 60 * 60 * 1000,
+    retry: 2,
+  });
+
+  useEffect(() => {
+    if (!authenticated) return;
+    if (algorandQuery.data) {
+      setStableAlgorandAddress(algorandQuery.data);
+    }
+  }, [authenticated, algorandQuery.data]);
+
+  const algorandAddress = authenticated
+    ? algorandQuery.data ?? stableAlgorandAddress
+    : null;
+
+  const sponsoredEvmRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!authenticated) {
+      sponsoredEvmRef.current = null;
+    }
+  }, [authenticated]);
+
+  useEffect(() => {
+    if (!authenticated || !evmAddress || !algorandAddress) return;
+    if (sponsoredEvmRef.current === evmAddress) return;
+    let cancelled = false;
+    void (async () => {
+      const delaysMs = [0, 2_000, 5_000];
+      for (const delayMs of delaysMs) {
+        if (cancelled) return;
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          if (cancelled) return;
+        }
+        try {
+          const token = await getAccessToken();
+          if (!token || cancelled) return;
+          const result = await requestEasyStartSponsor({
+            accessToken: token,
+            evmAddress,
+          });
+          if (cancelled) return;
+          if (isSponsorFullyFunded(result)) {
+            sponsoredEvmRef.current = evmAddress;
+            return;
+          }
+        } catch (error) {
+          console.warn("[Easy Start] sponsor", error);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, evmAddress, algorandAddress, getAccessToken]);
+
+  const value = useMemo(
+    (): PrivyEasyStartState => ({
+      enabled: true,
+      configured: true,
+      ready,
+      authenticated,
+      evmAddress,
+      algorandAddress,
+      algorandAddressLoading:
+        algorandQuery.isLoading && !algorandAddress,
+      displayName: privyDisplayName(user),
+      login,
+      logout,
+      signTransactions: authenticated && evmAddress ? signTransactions : null,
+      signTransactionGroup:
+        authenticated && evmAddress ? signTransactionGroup : null,
+      getAccessToken: authenticated ? getAccessToken : null,
+      blockReason: privyError ? privyError.message : null,
+    }),
+    [
+      algorandAddress,
+      algorandQuery.isLoading,
+      authenticated,
+      evmAddress,
+      getAccessToken,
+      login,
+      logout,
+      privyError,
+      ready,
+      signTransactionGroup,
+      signTransactions,
+      user,
+    ]
+  );
+
+  return (
+    <PrivyEasyStartContext.Provider value={value}>
+      {children}
+    </PrivyEasyStartContext.Provider>
+  );
+}
+
+interface PrivySessionProviderProps {
+  children: ReactNode;
+}
+
+class PrivyMountErrorBoundary extends React.Component<
+  { children: ReactNode; fallback: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(
+      "[Easy Start] Privy crashed; continuing without Easy Start.",
+      error
+    );
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function privyMountBlockReason(): string | null {
+  if (typeof window === "undefined") return null;
+  const originHint = getPrivyOriginHint();
+  if (originHint) return originHint;
+  // Privy embedded wallets throw "only available over HTTPS" on LAN HTTP
+  // (10.x / 192.168.x), which unmounted the whole SimplFi tree.
+  if (!window.isSecureContext) {
+    return "Privy embedded wallets need HTTPS or localhost. This page is not a secure context.";
+  }
+  return null;
+}
+
+/**
+ * Optional Privy wrapper for Easy Start onboarding. When disabled or unconfigured,
+ * children render unchanged (existing wallet flow only).
+ */
+export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
+  const enabled = resolvePrivyOnboardingEnabled(
+    isFeatureEnabled("enablePrivyOnboarding")
+  );
+  const configured = PRIVY_APP_ID.length > 0;
+  /** Remount Privy after HMR / stuck init so `ready` can recover (once). */
+  const [providerKey, setProviderKey] = useState(0);
+  const remountCountRef = useRef(0);
+  const mountBlockReason = privyMountBlockReason();
+
+  const disabledValue = useMemo(
+    (): PrivyEasyStartState => ({
+      ...DEFAULT_PRIVY_EASY_START_STATE,
+      enabled,
+      configured,
+      blockReason:
+        mountBlockReason ??
+        (!enabled
+          ? "Easy Start is turned off."
+          : !configured
+            ? "Missing Privy app id."
+            : null),
+    }),
+    [configured, enabled, mountBlockReason]
+  );
+
+  const crashValue = useMemo(
+    (): PrivyEasyStartState => ({
+      ...DEFAULT_PRIVY_EASY_START_STATE,
+      enabled,
+      configured,
+      blockReason:
+        "Privy crashed while loading. Check the console, then hard-refresh.",
+    }),
+    [configured, enabled]
+  );
+
+  const handleReadyStuck = useCallback(() => {
+    if (remountCountRef.current >= 1) return;
+    remountCountRef.current += 1;
+    setProviderKey((k) => k + 1);
+  }, []);
+
+  const fallback = (
+    <PrivyEasyStartContext.Provider value={disabledValue}>
+      {children}
+    </PrivyEasyStartContext.Provider>
+  );
+
+  const crashFallback = (
+    <PrivyEasyStartContext.Provider value={crashValue}>
+      {children}
+    </PrivyEasyStartContext.Provider>
+  );
+
+  if (!enabled || !configured || mountBlockReason) {
+    if (mountBlockReason) {
+      console.error("[Easy Start] Privy cannot init on this origin:", mountBlockReason);
+    }
+    return fallback;
+  }
+
+  return (
+    <PrivyMountErrorBoundary fallback={crashFallback}>
+      <PrivyProvider
+        key={providerKey}
+        appId={PRIVY_APP_ID}
+        config={{
+          loginMethods: ["email", "sms", "google", "passkey"],
+          appearance: {
+            theme: "dark",
+            accentColor: "#2d8b78",
+          },
+          // Phone sign-up. Privy’s dashboard “US and Canada only” SMS setting
+          // is what rejects numbers outside those countries.
+          intl: {
+            defaultCountry: "US",
+          },
+          embeddedWallets: {
+            ethereum: {
+              createOnLogin: "users-without-wallets",
+            },
+          },
+          defaultChain: base,
+          supportedChains: [base],
+        }}
+      >
+        <PrivyEasyStartStateBridge onReadyStuck={handleReadyStuck}>
+          {children}
+        </PrivyEasyStartStateBridge>
+      </PrivyProvider>
+    </PrivyMountErrorBoundary>
+  );
+}

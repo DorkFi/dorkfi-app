@@ -166,9 +166,17 @@ function minLtForPool(
     : normalizeLiquidationThresholdToDecimal(undefined);
 }
 
-function parsePoolGlobalUsd(value: unknown): number {
+/**
+ * Convert `get_global_user` collateral/borrow values (USD × 1e12) to a JS number.
+ * Must not use `Number(raw / 1e12n)` — BigInt division truncates (e.g. $1.32 → $1).
+ */
+export function parsePoolGlobalUsd(value: unknown): number {
   try {
-    return Number(BigInt(String(value ?? 0)) / BigInt(1e12));
+    const raw = BigInt(String(value ?? 0));
+    const scale = 10n ** 12n;
+    const whole = raw / scale;
+    const frac = raw % scale;
+    return Number(whole) + Number(frac) / 1e12;
   } catch {
     return 0;
   }

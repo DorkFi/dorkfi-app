@@ -9,7 +9,7 @@ import {
   Fuel,
   CircleArrowUp,
 } from "lucide-react";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
@@ -292,14 +292,6 @@ function normalizeMarketData(
   };
 }
 
-function poolIdFromMarketRow(market: Record<string, unknown>): string | undefined {
-  const direct = market.poolId;
-  if (direct != null && String(direct) !== "") return String(direct);
-  const mi = market.marketInfo as { poolId?: string } | undefined;
-  if (mi?.poolId != null && String(mi.poolId) !== "") return String(mi.poolId);
-  return undefined;
-}
-
 /** Matches `useOnDemandMarketData` cache keys (canonical symbol + optional pool id). */
 function marketKeyForOnDemandLoad(
   poolId: string | undefined,
@@ -556,7 +548,7 @@ const MarketsTable = () => {
   const [marketsToolbarAlgoRefreshNonce, setMarketsToolbarAlgoRefreshNonce] =
     useState(0);
 
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
 
   const { currentNetwork, switchNetwork } = useNetwork();
 
@@ -3517,7 +3509,7 @@ const MarketsTable = () => {
 
     const load = async () => {
       try {
-        const [depositBal, borrowData, globalData] = await Promise.all([
+        const [depositData, borrowData, globalData] = await Promise.all([
           fetchUserDepositBalance(
             userAddress,
             rpcPoolId,
@@ -3536,7 +3528,7 @@ const MarketsTable = () => {
         if (loadId !== detailPositionLoadIdRef.current) return;
 
         const position = buildPosition(
-          depositBal,
+          depositData?.balance ?? null,
           borrowData,
           globalData,
           null,

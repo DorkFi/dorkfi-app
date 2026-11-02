@@ -94,4 +94,18 @@ describe("portfolioDisplayHealthFactor", () => {
     expect(totalCollateral).toBe(150);
     expect(totalBorrowed).toBe(50);
   });
+
+  it("preserves fractional USD when decoding 1e12-scaled globals", () => {
+    const scale = (usd: number) => String(BigInt(Math.round(usd * 1e12)));
+    const { totalCollateral, totalBorrowed } = sumGlobalUserTotals([
+      {
+        network: "algorand-mainnet",
+        poolId: "1",
+        totalCollateralValue: scale(1.317055),
+        totalBorrowValue: scale(0),
+      },
+    ]);
+    expect(totalCollateral).toBeCloseTo(1.317055, 6);
+    expect(totalBorrowed).toBe(0);
+  });
 });

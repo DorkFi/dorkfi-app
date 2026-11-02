@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { haystackProxyPlugin } from "./vite/haystackProxyPlugin";
+import { offrampApiPlugin } from "./plugins/offrampApiPlugin";
+import { xoSwapApiPlugin } from "./plugins/xoSwapApiPlugin";
+import { sponsorApiPlugin } from "./plugins/sponsorApiPlugin";
 
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
@@ -10,6 +13,36 @@ const GOVERNANCE_RAILWAY =
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  // Expose CDP / MoonPay secrets to the Vite Node process for /api/offramp
+  for (const key of [
+    "CDP_API_KEY_ID",
+    "CDP_API_KEY_SECRET",
+    "COINBASE_CDP_API_KEY_ID",
+    "COINBASE_CDP_API_KEY_SECRET",
+    "CDP_API_KEY",
+    "CDP_API_SECRET",
+    "MOONPAY_SECRET_KEY",
+    "XO_SWAP_APP_NAME",
+    "XO_SWAP_APP_VERSION",
+    "XO_SWAP_API_KEY",
+    "XO_SWAP_API_BASE",
+    "PRIVY_APP_ID",
+    "VITE_PRIVY_APP_ID",
+    "PRIVY_APP_SECRET",
+    "CDP_CLIENT_IP",
+    "VITE_OFFRAMP_REDIRECT_URL",
+    "OFFRAMP_REDIRECT_URL",
+    "SPONSOR_ENABLED",
+    "SPONSOR_ETH_PRIVATE_KEY",
+    "SPONSOR_ETH_AMOUNT_WEI",
+    "SPONSOR_ETH_RPC",
+    "SPONSOR_ALGO_MNEMONIC",
+    "SPONSOR_ALGO_MICRO",
+    "SPONSOR_ALGOD_URL",
+  ] as const) {
+    if (env[key] && !process.env[key]) process.env[key] = env[key];
+  }
+
   const governanceLocalTarget =
     env.VITE_GOVERNANCE_LOCAL_TARGET || "http://127.0.0.1:8787";
   const governanceNgrokTarget =
@@ -21,6 +54,8 @@ export default defineConfig(({ mode }) => {
   server: {
     host: "::",
     port: 8080,
+    /** Fail instead of falling back to :8081 — Privy only allowlists localhost:8080. */
+    strictPort: true,
     hmr: {
       protocol: "ws",
     },
@@ -60,6 +95,9 @@ export default defineConfig(({ mode }) => {
   plugins: [
     react(),
     haystackProxyPlugin(env),
+    offrampApiPlugin(),
+    xoSwapApiPlugin(),
+    sponsorApiPlugin(),
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),
@@ -76,6 +114,9 @@ export default defineConfig(({ mode }) => {
       "wagmi",
       "@wagmi/core",
       "@rainbow-me/rainbowkit",
+      "@privy-io/react-auth",
+      "@privy-io/wagmi",
+      "@moonpay/moonpay-react",
     ],
   },
   define: {
@@ -84,6 +125,8 @@ export default defineConfig(({ mode }) => {
   optimizeDeps: {
     include: [
       "buffer",
+      "@privy-io/react-auth",
+      "@moonpay/moonpay-react",
       "@txnlab/use-wallet-react",
       "@walletconnect/modal",
       "@walletconnect/sign-client",
@@ -92,7 +135,6 @@ export default defineConfig(({ mode }) => {
       "algosdk",
       "@algorandfoundation/algokit-utils",
     ],
-    force: true, // Force re-optimization on next dev server start
   },
 };
 });

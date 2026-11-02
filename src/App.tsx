@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { NetworkProvider } from "./contexts/NetworkProvider";
+import { PrivySessionProvider } from "./contexts/PrivySessionProvider";
+import { EasyStartModalsProvider } from "./contexts/EasyStartModalsContext";
 import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
@@ -66,12 +68,16 @@ function App() {
       disableTransitionOnChange
     >
       <AppErrorBoundary>
+      <PrivySessionProvider>
       <NetworkProvider>
-        <LocaleSettingsProvider>
+      {/* Locale outside Easy Start modals so deposit/withdraw sheets can use useNumberI18n */}
+      <LocaleSettingsProvider>
+      {/* Router above the sheets so Link / useNavigate work inside the dialogs. */}
+      <BrowserRouter>
+      <EasyStartModalsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
             <AppErrorBoundary label="Page">
             <Routes>
               <Route
@@ -177,10 +183,12 @@ function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             </AppErrorBoundary>
-          </BrowserRouter>
         </TooltipProvider>
-        </LocaleSettingsProvider>
+      </EasyStartModalsProvider>
+      </BrowserRouter>
+      </LocaleSettingsProvider>
       </NetworkProvider>
+      </PrivySessionProvider>
       </AppErrorBoundary>
     </ThemeProvider>
     </QueryClientProvider>

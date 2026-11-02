@@ -19,7 +19,7 @@ import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import SupplyBorrowHeader from "./SupplyBorrowHeader";
 import SupplyBorrowForm from "./SupplyBorrowForm";
 import SupplyBorrowStats from "./SupplyBorrowStats";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   deposit,
@@ -87,9 +87,10 @@ import {
 import TransactionSignPreview from "./TransactionSignPreview";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import {
-  isRainbowkitXchainWallet,
+  isEvmXchainWallet,
   withRainbowkitHostDialogDismissed,
 } from "@/wallet/xchainSignUi";
+import { isAlgorandMainnetXchainWallet } from "@/wallet/privySyntheticWallet";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import {
@@ -470,7 +471,7 @@ const SupplyBorrowModal = ({
   const [borrowUserGlobalFallbackRetry, setBorrowUserGlobalFallbackRetry] =
     useState(0);
 
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
 
@@ -2042,7 +2043,7 @@ const SupplyBorrowModal = ({
           });
           const res2 = await algorandClients.algod.sendRawTransaction(stxns2).do();
           await finalizeAfterSign(stxns2, pending2, res2);
-          if (isRainbowkitXchainWallet(activeWallet)) {
+          if (isEvmXchainWallet(activeWallet)) {
             setShowSuccess(false);
             toast({
               title: "Supply confirmed",
@@ -2052,7 +2053,7 @@ const SupplyBorrowModal = ({
             onClose();
           }
         } catch (chainErr) {
-          if (isRainbowkitXchainWallet(activeWallet)) {
+          if (isEvmXchainWallet(activeWallet)) {
             setRainbowkitSignDialogSuppressed(false);
           }
           console.error("Deposit two-step chain:", chainErr);
@@ -2246,8 +2247,10 @@ const SupplyBorrowModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
-        const isXchainRainbowkit =
-          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+        const isXchainRainbowkit = isAlgorandMainnetXchainWallet(
+          activeWallet,
+          networkId
+        );
 
         const isSupported =
           isXchainRainbowkit ||
@@ -2305,7 +2308,7 @@ const SupplyBorrowModal = ({
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
       await finalizeAfterSign(stxns, pending, res);
-      if (isRainbowkitXchainWallet(activeWallet)) {
+      if (isEvmXchainWallet(activeWallet)) {
         setShowSuccess(false);
         toast({
           title: mode === "deposit" ? "Supply confirmed" : "Borrow confirmed",
@@ -2315,7 +2318,7 @@ const SupplyBorrowModal = ({
         onClose();
       }
     } catch (error) {
-      if (isRainbowkitXchainWallet(activeWallet)) {
+      if (isEvmXchainWallet(activeWallet)) {
         setRainbowkitSignDialogSuppressed(false);
       }
       console.error(`${mode} sign error:`, error);
@@ -2376,8 +2379,10 @@ const SupplyBorrowModal = ({
           isWalletConnectAlgorand =
             walletName.includes("pera") || walletName.includes("defly");
         }
-        const isXchainRainbowkit =
-          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+        const isXchainRainbowkit = isAlgorandMainnetXchainWallet(
+          activeWallet,
+          networkId
+        );
 
         const isSupported =
           isXchainRainbowkit ||

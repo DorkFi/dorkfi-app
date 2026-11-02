@@ -62,9 +62,9 @@ const LiquidityPoolCardContainer = ({
       lendingMarket.poolId,
       lendingMarket.marketId,
       pair.networkId
-    ).then((balance) => {
+    ).then((data) => {
       if (!cancelled) {
-        setSuppliedBalance(balance ?? 0);
+        setSuppliedBalance(data?.balance ?? 0);
       }
     });
 
