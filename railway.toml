@@ -1,5 +1,7 @@
 [build]
-builder = "NIXPACKS"
+builder = "RAILPACK"
+# Share server only. The Vite build OOMs on Railway and is published separately.
+buildCommand = "echo 'Skipping frontend build; share server only'"
 
 [deploy]
 startCommand = "npm run start:share-server"
