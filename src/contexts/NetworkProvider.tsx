@@ -178,6 +178,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
           options: { siteName: "DorkFi" },
         },
         WalletId.PERA,
+        WalletId.DEFLY,
         {
           id: WalletId.BIATEC,
           options: {
@@ -204,7 +205,6 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
               icons: ["https://app.dork.fi/favicon.ico"],
             },
             enableExplorer: true,
-            explorerRecommendedWalletIds: ["vera"],
             themeMode: "light",
           },
         },

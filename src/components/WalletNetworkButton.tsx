@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +43,9 @@ interface WalletNetworkButtonProps {
   onNetworkChange?: (networkId: NetworkId) => void;
 }
 
+/** Radix menus lock pointer events until they finish closing. */
+const MENU_DISMISS_MS = 120;
+
 const WalletNetworkButton = ({
   currentNetwork = "algorand-mainnet",
   onNetworkChange,
@@ -60,6 +63,7 @@ const WalletNetworkButton = ({
   } = useNetwork();
   const [copied, setCopied] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
+  const walletModalTimerRef = useRef<number | null>(null);
   const [selectedNetwork, setSelectedNetwork] =
     useState<NetworkId>(contextNetwork);
   const { toast } = useToast();
@@ -180,8 +184,22 @@ const WalletNetworkButton = ({
   };
 
   const handleOpenWalletModal = () => {
-    setIsWalletModalOpen(true);
+    if (walletModalTimerRef.current != null) {
+      window.clearTimeout(walletModalTimerRef.current);
+    }
+    walletModalTimerRef.current = window.setTimeout(() => {
+      walletModalTimerRef.current = null;
+      setIsWalletModalOpen(true);
+    }, MENU_DISMISS_MS);
   };
+
+  useEffect(() => {
+    return () => {
+      if (walletModalTimerRef.current != null) {
+        window.clearTimeout(walletModalTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleCloseWalletModal = () => {
     setIsWalletModalOpen(false);
@@ -281,7 +299,7 @@ const WalletNetworkButton = ({
 
       // If no wallet is connected, open wallet modal after switching network
       if (!activeAccount) {
-        setIsWalletModalOpen(true);
+        handleOpenWalletModal();
         toast({
           title: "Network Switched",
           description: `Switched to ${networkConfig.name}. Please connect your wallet.`,
@@ -459,7 +477,7 @@ const WalletNetworkButton = ({
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105 flex items-center gap-2">
             {showEasyStartEntry ? (
@@ -476,7 +494,11 @@ const WalletNetworkButton = ({
             <ChevronDown className="w-4 h-4 opacity-70" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuContent
+          align="end"
+          className="w-64"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
           {showEasyStartEntry ? (
             <>
               <div className="px-2 py-1.5">
@@ -511,7 +533,7 @@ const WalletNetworkButton = ({
             </div>
           )}
           <DropdownMenuItem
-            onClick={handleOpenWalletModal}
+            onSelect={handleOpenWalletModal}
             className="cursor-pointer"
           >
             <Wallet className="w-4 h-4 mr-2" />
@@ -534,6 +556,7 @@ const WalletNetworkButton = ({
       <WalletModal
         isOpen={isWalletModalOpen}
         onClose={handleCloseWalletModal}
+        openToWallets
       />
     </>
   );

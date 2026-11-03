@@ -26,6 +26,8 @@ import { cn } from "@/lib/utils";
 interface WalletModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Open on the wallet list instead of the Get Started chooser. */
+  openToWallets?: boolean;
 }
 
 interface WalletProvider {
@@ -40,7 +42,11 @@ interface WalletProvider {
 // Connection timeout in milliseconds (60 seconds)
 const CONNECTION_TIMEOUT = 60000;
 
-const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
+const WalletModal: React.FC<WalletModalProps> = ({
+  isOpen,
+  onClose,
+  openToWallets = false,
+}) => {
   const { wallets } = useWallet();
   const { toast } = useToast();
   const { currentNetwork, switchNetwork, isSwitchingNetwork } = useNetwork();
@@ -54,6 +60,11 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
   const openEasyStartLogin = useEasyStartLogin();
   const [isEasyStartLoading, setIsEasyStartLoading] = useState(false);
   const [showWallets, setShowWallets] = useState(false);
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+    setShowWallets(isOpen && openToWallets);
+  }
 
   const showGetStarted =
     privyEasyStart.enabled &&
@@ -323,7 +334,6 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
             return;
           }
 
-          // Connect to WalletConnect (which will show Vera Wallet in the modal)
           await walletConnectWallet.connect();
 
           // Check again after connection
@@ -443,7 +453,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-6 max-h-[90vh] overflow-y-auto relative">
         <DialogHeader className="pb-4 pr-8">
-          {showGetStarted && showWallets ? (
+          {showGetStarted && showWallets && !openToWallets ? (
             <button
               type="button"
               onClick={() => setShowWallets(false)}
@@ -543,6 +553,41 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
               Wallets on {getNetworkDisplayName(currentNetwork)}
             </p>
           )}
+
+          {showGetStarted ? (
+            <div className="flex items-center justify-between p-4 rounded-lg border border-gray-200/50 dark:border-gray-700/50 hover:border-ocean-teal/40 transition-colors">
+              <div className="flex items-center space-x-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-ocean-teal/15 text-ocean-teal">
+                  <Mail className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm">Email</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Connect with email
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                onClick={() => void handleEasyStartEmail()}
+                disabled={
+                  isEasyStartLoading ||
+                  (!privyEasyStart.login && !privyEasyStart.configured)
+                }
+                className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105"
+                size="sm"
+              >
+                {isEasyStartLoading ? (
+                  <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Mail className="w-4 h-4 mr-1" />
+                    Connect
+                  </>
+                )}
+              </Button>
+            </div>
+          ) : null}
 
           {walletProviders.map((provider) => (
             <div
