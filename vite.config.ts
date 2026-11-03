@@ -102,10 +102,17 @@ export default defineConfig(({ mode }) => {
     componentTagger(),
   ].filter(Boolean),
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      buffer: "buffer",
-    },
+    alias: [
+      {
+        find: /^@solana-program\/system$/,
+        replacement: path.resolve(
+          __dirname,
+          "./src/shims/solana-program-system.ts",
+        ),
+      },
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      { find: "buffer", replacement: "buffer" },
+    ],
     dedupe: [
       "react",
       "react-dom",
