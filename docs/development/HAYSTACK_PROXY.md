@@ -72,7 +72,7 @@ DEV defaults the UI on when the flag is unset. `beta.dork.fi` also auto-enables 
 
 - Anything prefixed `VITE_` is embedded in the client bundle. Never put the Haystack key there.
 - The standalone proxy rejects browser `Origin` values outside `HAYSTACK_PROXY_CORS_ORIGINS` (required when binding a non-loopback host). That stops casual quota abuse from other websites; it is not a full auth layer.
-- Client-supplied `apiKey` query/body fields are stripped before the proxy injects the server key.
+- Client-supplied `apiKey` query/body fields and any client `X-API-Key` are dropped. The proxy sends `HAYSTACK_API_KEY` only in the upstream `X-API-Key` header. A `hay_sk_` secret in the URL is rejected by Haystack.
 - Do not commit `.env` / `.env.local`.
 
 ## Related code

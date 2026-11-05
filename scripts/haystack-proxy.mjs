@@ -101,7 +101,10 @@ function applyCors(req, res) {
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-API-Key"
+  );
   return true;
 }
 
@@ -135,11 +138,14 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && url.pathname === "/api/fetchQuote") {
       const params = new URLSearchParams(url.search);
-      // Never forward a client-supplied key; always inject the server secret.
+      // Never forward a client-supplied key. Header only: a `hay_sk_` key in
+      // the URL is rejected even when X-API-Key is also set.
       params.delete("apiKey");
-      params.set("apiKey", API_KEY);
-      const upstream = `${UPSTREAM}/api/fetchQuote?${params.toString()}`;
-      const r = await fetch(upstream);
+      const qs = params.toString();
+      const upstream = `${UPSTREAM}/api/fetchQuote${qs ? `?${qs}` : ""}`;
+      const r = await fetch(upstream, {
+        headers: { "X-API-Key": API_KEY },
+      });
       const text = await r.text();
       res.writeHead(r.status, {
         "Content-Type": r.headers.get("content-type") || "application/json",
@@ -160,11 +166,13 @@ const server = http.createServer(async (req, res) => {
       }
       if (body && typeof body === "object") {
         delete body.apiKey;
-        body.apiKey = API_KEY;
       }
       const r = await fetch(`${UPSTREAM}/api/fetchExecuteSwapTxns`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": API_KEY,
+        },
         body: JSON.stringify(body),
       });
       const text = await r.text();

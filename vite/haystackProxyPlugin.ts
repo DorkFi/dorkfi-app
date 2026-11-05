@@ -35,11 +35,14 @@ function createHaystackMiddleware(apiKey: string, upstreamBase: string) {
         const search =
           qIndex >= 0 ? pathAndQuery.slice(qIndex + 1) : "";
         const params = new URLSearchParams(search);
-        // Never forward a client-supplied key; always inject the server secret.
+        // Never forward a client-supplied key. The server key goes in the header
+        // only — a `hay_sk_` key in the URL is rejected.
         params.delete("apiKey");
-        params.set("apiKey", apiKey);
-        const target = `${upstream}/api/fetchQuote?${params.toString()}`;
-        const r = await fetch(target);
+        const qs = params.toString();
+        const target = `${upstream}/api/fetchQuote${qs ? `?${qs}` : ""}`;
+        const r = await fetch(target, {
+          headers: { "X-API-Key": apiKey },
+        });
         const text = await r.text();
         res.statusCode = r.status;
         res.setHeader(
@@ -65,10 +68,12 @@ function createHaystackMiddleware(apiKey: string, upstreamBase: string) {
           return;
         }
         delete body.apiKey;
-        body.apiKey = apiKey;
         const r = await fetch(`${upstream}/api/fetchExecuteSwapTxns`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+          },
           body: JSON.stringify(body),
         });
         const text = await r.text();

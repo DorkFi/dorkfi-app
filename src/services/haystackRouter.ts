@@ -6,8 +6,12 @@ import { RouterClient, type SwapQuote } from "@txnlab/haystack-router";
 import type { NetworkId } from "@/config";
 import { getNetworkConfig } from "@/config";
 
-/** Free-tier key (60 req/min). Override with VITE_HAYSTACK_API_KEY for production. */
-const FREE_TIER_API_KEY = "1b72df7e-1131-4449-8ce1-29b79dd3f51e";
+/**
+ * Public free-tier key (60 req/min). SDK 3.3+ sends it as `X-API-Key`.
+ * The previous free-tier key is deprecated (rate drops Dec 1 2026, off Apr 1 2027).
+ * Override with VITE_HAYSTACK_API_KEY only for another public key, never a secret.
+ */
+const FREE_TIER_API_KEY = "hay_pk_4zhj33wahuxfplteyif5xpcgnm";
 
 function resolveApiKey(): string {
   const fromEnv =

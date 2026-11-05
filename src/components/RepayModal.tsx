@@ -382,6 +382,7 @@ const RepayModal = ({
     debtAmountHuman: amount === "" ? "" : String(amount),
     debtDecimals: repayTokenDecimals,
     chain: "mainnet",
+    address: activeAccount?.address,
   });
 
   useEffect(() => {
