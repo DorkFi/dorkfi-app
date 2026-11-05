@@ -460,7 +460,7 @@ export function EasyStartDepositSheet({
     if (hasUsdcOnBase) {
       methods.push({
         id: "balance",
-        title: consumerCopy ? "SimplFi balance" : "Account balance",
+        title: consumerCopy ? "DorkFi balance" : "Account balance",
         description: `${formatCurrency(baseUsdcNum, "USD", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
@@ -670,7 +670,7 @@ export function EasyStartDepositSheet({
                     method === "coinbase"
                       ? "ALGO will be sent to your Algorand account"
                       : consumerCopy
-                        ? "This will be added to your SimplFi balance"
+                        ? "This will be added to your DorkFi balance"
                         : "This will be added to your Base wallet"
                   }
                 />
@@ -766,7 +766,7 @@ export function EasyStartDepositSheet({
                   feeLabel="Fee shown at checkout"
                   receiveLabel={
                     consumerCopy
-                      ? "Added to your SimplFi balance"
+                      ? "Added to your DorkFi balance"
                       : "Added to your account"
                   }
                 />

@@ -491,7 +491,7 @@ export function EasyStartWithdrawSheet({
                 subtitle={
                   legacyUsdc
                     ? consumerCopy
-                      ? "Send money from your SimplFi balance."
+                      ? "Send money from your DorkFi balance."
                       : "Send money from your account."
                     : "Send ALGO from your Algorand account."
                 }
