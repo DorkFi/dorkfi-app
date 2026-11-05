@@ -227,24 +227,6 @@ const PoolPairCard = ({
       )}
 
       <div className="mt-auto flex flex-col gap-2">
-        {dexLink ? (
-          <DorkFiButton
-            variant="secondary"
-            type="button"
-            className={cn(
-              "w-full",
-              dexLink.isFarm &&
-                "border-amber-500/40 text-amber-800 hover:bg-amber-50 dark:text-amber-200 dark:hover:bg-amber-950/40"
-            )}
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(dexLink.url, "_blank", "noopener,noreferrer");
-            }}
-          >
-            <ExternalLink className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-            {dexLink.label}
-          </DorkFiButton>
-        ) : null}
         {lendingMarket ? (
           <>
             {hasFarm ? <PoolFarmSupplyNotice /> : null}
@@ -303,6 +285,24 @@ const PoolPairCard = ({
           Withdraw
         </DorkFiButton>
         </div>
+        ) : null}
+        {dexLink ? (
+          <DorkFiButton
+            variant="secondary"
+            type="button"
+            className={cn(
+              "w-full",
+              dexLink.isFarm &&
+                "border-amber-500/40 text-amber-800 hover:bg-amber-50 dark:text-amber-200 dark:hover:bg-amber-950/40"
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(dexLink.url, "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLink className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+            {dexLink.label}
+          </DorkFiButton>
         ) : null}
       </div>
     </DorkFiCard>

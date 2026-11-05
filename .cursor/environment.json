@@ -1,0 +1,4 @@
+{
+  "install": "npm ci --ignore-scripts",
+  "start": "SESSION=vite-dev-server; tmux -f /exec-daemon/tmux.portal.conf has-session -t \"=$SESSION\" 2>/dev/null || tmux -f /exec-daemon/tmux.portal.conf new-session -d -s \"$SESSION\" -c /workspace -- bash -lc 'npm run dev -- --host 0.0.0.0 --port 8080'"
+}
