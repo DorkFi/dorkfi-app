@@ -734,6 +734,7 @@ async function fetchCompactRepayQuote(args: {
   poolId: string;
   marketId: string;
   networkId: NetworkId;
+  address?: string;
 }): Promise<HaystackQuoteResponse | null> {
   const fromASAID = Number(args.quote.fromASAID);
   const toASAID = Number(args.quote.toASAID);
@@ -760,6 +761,7 @@ async function fetchCompactRepayQuote(args: {
     toASAID,
     maxGroupSize: haystackRepayMaxGroupSize(),
     disabledProtocols: ["Humble"],
+    address: args.address,
   });
 }
 

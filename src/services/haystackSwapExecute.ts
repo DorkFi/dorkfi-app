@@ -16,8 +16,9 @@ export function asSdkQuote(quote: HaystackQuoteResponse): FetchQuoteResponse {
 }
 
 /**
- * SDK calls `${apiBaseUrl}/fetchQuote` and `${apiBaseUrl}/fetchExecuteSwapTxns`.
- * Our Vite proxy serves those under `/api/haystack/api/…` and injects HAYSTACK_API_KEY.
+ * SDK calls `${apiBaseUrl}/fetchQuote` and `${apiBaseUrl}/fetchExecuteSwapTxns`
+ * with `X-API-Key`. Our proxy serves those under `/api/haystack/api/…`, drops the
+ * browser key, and sends HAYSTACK_API_KEY in that header.
  */
 export function getHaystackSdkApiBaseUrl(): string {
   const base = getHaystackProxyBaseUrl().replace(/\/$/, "");

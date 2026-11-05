@@ -16,6 +16,8 @@ export type UseHaystackRepayQuoteArgs = {
   debtAmountHuman: string;
   debtDecimals: number;
   chain?: "mainnet" | "testnet";
+  /** Swapper account, sent so First Stage taxed assets quote with their tax. */
+  address?: string | null;
 };
 
 export type HaystackRepayQuoteState = {
@@ -103,6 +105,7 @@ export function useHaystackRepayQuote(
             // Compact routes so SwapComposer can append repay in one atomic group.
             maxGroupSize: haystackRepayMaxGroupSize(),
             disabledProtocols: ["Humble"],
+            address: args.address ?? undefined,
           });
           if (cancelled) return;
           if (!q.txnPayload) {
@@ -137,6 +140,7 @@ export function useHaystackRepayQuote(
     args.debtAmountHuman,
     args.debtDecimals,
     args.chain,
+    args.address,
     tick,
   ]);
 
