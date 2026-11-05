@@ -1,5 +1,4 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -446,23 +445,29 @@ export function TrustValueList({
   );
 }
 
+const DORKFI_LEGAL_URL = "https://docs.dork.fi/legal/";
+
 export function TermsNote() {
   return (
     <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-      By continuing you agree to SimplFi’s{" "}
-      <Link
-        to="/terms"
+      By continuing you agree to DorkFi’s{" "}
+      <a
+        href={DORKFI_LEGAL_URL}
+        target="_blank"
+        rel="noopener noreferrer"
         className="font-medium text-ocean-teal underline-offset-2 hover:underline"
       >
-        Terms of Service
-      </Link>{" "}
+        Terms of Use
+      </a>{" "}
       and{" "}
-      <Link
-        to="/privacy"
+      <a
+        href={DORKFI_LEGAL_URL}
+        target="_blank"
+        rel="noopener noreferrer"
         className="font-medium text-ocean-teal underline-offset-2 hover:underline"
       >
         Privacy Policy
-      </Link>
+      </a>
       .
     </p>
   );
