@@ -68,6 +68,8 @@ function PrivyEasyStartStateBridge({
   const { toast } = useToast();
   const { login: privyLogin } = useLogin({
     onError: (code) => {
+      // Closing the sign-in modal is a cancel, not a failed login.
+      if (code === "exited_auth_flow") return;
       console.error("[Easy Start] Privy login error", code);
       toast({
         title: "Get Started failed",

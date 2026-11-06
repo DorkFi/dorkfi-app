@@ -35,7 +35,7 @@ export function SimplFiAppRoot({ children }: SimplFiAppRootProps) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider
         attribute="class"
-        defaultTheme="system"
+        defaultTheme="light"
         enableSystem
         storageKey="simplfi-theme"
         disableTransitionOnChange
