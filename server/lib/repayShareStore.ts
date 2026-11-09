@@ -2,6 +2,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import { randomUrlSafeString } from "./randomId.js";
+import { sweepIndexedShareDir, withShareWriteLock } from "./shareDisk.js";
 
 export type RepayShareRecord = {
   id: string;
@@ -52,13 +53,15 @@ function isExpired(record: RepayShareRecord): boolean {
 }
 
 async function removeShare(id: string): Promise<void> {
-  delete index[id];
-  await persistIndex();
-  try {
-    await unlink(imagePath(id));
-  } catch {
-    // image may already be gone
-  }
+  await withShareWriteLock(async () => {
+    delete index[id];
+    await persistIndex();
+    try {
+      await unlink(imagePath(id));
+    } catch {
+      // image may already be gone
+    }
+  });
 }
 
 export async function createRepayShare(params: {
@@ -103,6 +106,24 @@ export async function getRepayShare(
     return null;
   }
   return record;
+}
+
+export async function sweepExpiredRepayShares(now = Date.now()): Promise<number> {
+  return withShareWriteLock(async () => {
+    await ensureLoaded();
+    return sweepIndexedShareDir({
+      dir: shareDir(),
+      index,
+      now,
+      imagePath,
+      persistIndex,
+    });
+  });
+}
+
+export function resetRepayShareStoreForTests(): void {
+  index = {};
+  loaded = false;
 }
 
 export async function getRepayShareImage(

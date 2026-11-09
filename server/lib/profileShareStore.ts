@@ -2,6 +2,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import { randomUrlSafeString } from "./randomId.js";
+import { sweepIndexedShareDir, withShareWriteLock } from "./shareDisk.js";
 
 export type ProfileShareRecord = {
   id: string;
@@ -51,13 +52,15 @@ function isExpired(record: ProfileShareRecord): boolean {
 }
 
 async function removeShare(id: string): Promise<void> {
-  delete index[id];
-  await persistIndex();
-  try {
-    await unlink(imagePath(id));
-  } catch {
-    // image may already be gone
-  }
+  await withShareWriteLock(async () => {
+    delete index[id];
+    await persistIndex();
+    try {
+      await unlink(imagePath(id));
+    } catch {
+      // image may already be gone
+    }
+  });
 }
 
 export async function createProfileShare(params: {
@@ -98,6 +101,26 @@ export async function getProfileShare(
     return null;
   }
   return record;
+}
+
+export async function sweepExpiredProfileShares(
+  now = Date.now()
+): Promise<number> {
+  return withShareWriteLock(async () => {
+    await ensureLoaded();
+    return sweepIndexedShareDir({
+      dir: shareDir(),
+      index,
+      now,
+      imagePath,
+      persistIndex,
+    });
+  });
+}
+
+export function resetProfileShareStoreForTests(): void {
+  index = {};
+  loaded = false;
 }
 
 export async function getProfileShareImage(

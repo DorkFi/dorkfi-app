@@ -98,9 +98,15 @@ after any change.
 |----------|---------|
 | `X_REPAY_SHARE_STORE_PATH` | Repay image/index store (default `.data/repay-shares`) |
 | `X_BORROW_SHARE_STORE_PATH` | Borrow image/index store (default `.data/borrow-shares`) |
-| `X_REPAY_SHARE_TTL_DAYS` | Repay link TTL (default `90`) |
+| `X_PROFILE_SHARE_STORE_PATH` | Profile image/index store (default `.data/profile-shares`) |
+| `X_REPAY_SHARE_TTL_DAYS` | Repay link TTL (default `7`) |
 | `X_BORROW_SHARE_TTL_DAYS` | Borrow link TTL (default: same as repay TTL) |
+| `X_PROFILE_SHARE_TTL_DAYS` | Profile link TTL (default: same as repay TTL) |
+| `X_SHARE_STORE_MAX_FILES` | Refuse creates at this many stored PNGs (default `2000`) |
+| `X_SHARE_STORE_MAX_BYTES` | Refuse creates at this many stored PNG bytes (default `536870912`, 512 MiB) |
 | `NIXPACKS_NODE_VERSION` | `22` (also in `nixpacks.toml`) |
+
+Uploads are unauthenticated. Each create is limited to about 1 MB, PNG bytes only, and text fields of at most 48 characters. The same client can create 10 links per 10 minutes. Over-budget creates return `503`. A timer deletes expired files every 15 minutes, including cards nobody opened.
 
 `PORT` is injected by Railway.
 

@@ -53,51 +53,63 @@ function resolveFrontendOrigin(origins: string[]): string {
 
 const frontendOrigins = resolveFrontendOrigins();
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_SHARE_TTL_DAYS = 7;
+
+function envPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1) return fallback;
+  return Math.floor(value);
+}
+
+/** Read a day-count env var. `fallbackName` is used when `name` is unset. */
+function ttlFromEnv(name: string, fallbackName?: string): number {
+  if (process.env[name]?.trim()) {
+    return envPositiveInt(name, DEFAULT_SHARE_TTL_DAYS) * DAY_MS;
+  }
+  if (fallbackName && process.env[fallbackName]?.trim()) {
+    return envPositiveInt(fallbackName, DEFAULT_SHARE_TTL_DAYS) * DAY_MS;
+  }
+  return DEFAULT_SHARE_TTL_DAYS * DAY_MS;
+}
+
 export const config = {
   port: Number(process.env.PORT || optional("X_SHARE_PORT", "8788")),
   /** Allowed browser origins for CORS (supports comma-separated env). */
   frontendOrigins,
   /** Primary origin for human redirects after opening a share permalink. */
   frontendOrigin: resolveFrontendOrigin(frontendOrigins),
-  repayShareStorePath: optional(
-    "X_REPAY_SHARE_STORE_PATH",
-    ".data/repay-shares"
-  ),
-  /** Default 90 days. */
-  repayShareTtlMs:
-    Number(optional("X_REPAY_SHARE_TTL_DAYS", "90")) * 24 * 60 * 60 * 1000,
-  borrowShareStorePath: optional(
-    "X_BORROW_SHARE_STORE_PATH",
-    ".data/borrow-shares"
-  ),
-  /** Default 90 days (falls back to repay TTL env when unset). */
-  borrowShareTtlMs:
-    Number(
-      optional(
-        "X_BORROW_SHARE_TTL_DAYS",
-        optional("X_REPAY_SHARE_TTL_DAYS", "90")
-      )
-    ) *
-    24 *
-    60 *
-    60 *
-    1000,
-  profileShareStorePath: optional(
-    "X_PROFILE_SHARE_STORE_PATH",
-    ".data/profile-shares"
-  ),
-  /** Default 90 days (falls back to repay TTL env when unset). */
-  profileShareTtlMs:
-    Number(
-      optional(
-        "X_PROFILE_SHARE_TTL_DAYS",
-        optional("X_REPAY_SHARE_TTL_DAYS", "90")
-      )
-    ) *
-    24 *
-    60 *
-    60 *
-    1000,
+  get repayShareStorePath(): string {
+    return optional("X_REPAY_SHARE_STORE_PATH", ".data/repay-shares");
+  },
+  /** Default 7 days — long enough for X to fetch the card. */
+  get repayShareTtlMs(): number {
+    return ttlFromEnv("X_REPAY_SHARE_TTL_DAYS");
+  },
+  get borrowShareStorePath(): string {
+    return optional("X_BORROW_SHARE_STORE_PATH", ".data/borrow-shares");
+  },
+  /** Default 7 days. Falls back to the repay TTL when unset. */
+  get borrowShareTtlMs(): number {
+    return ttlFromEnv("X_BORROW_SHARE_TTL_DAYS", "X_REPAY_SHARE_TTL_DAYS");
+  },
+  get profileShareStorePath(): string {
+    return optional("X_PROFILE_SHARE_STORE_PATH", ".data/profile-shares");
+  },
+  /** Default 7 days. Falls back to the repay TTL when unset. */
+  get profileShareTtlMs(): number {
+    return ttlFromEnv("X_PROFILE_SHARE_TTL_DAYS", "X_REPAY_SHARE_TTL_DAYS");
+  },
+  /** Refuse new share images once this many PNGs are stored. */
+  get shareStoreMaxFiles(): number {
+    return envPositiveInt("X_SHARE_STORE_MAX_FILES", 2000);
+  },
+  /** Refuse new share images once stored PNG bytes reach this budget. */
+  get shareStoreMaxBytes(): number {
+    return envPositiveInt("X_SHARE_STORE_MAX_BYTES", 512 * 1024 * 1024);
+  },
   sharePublicBase: resolveSharePublicBase(),
   isProduction: process.env.NODE_ENV === "production",
 };
