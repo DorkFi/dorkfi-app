@@ -62,10 +62,7 @@ export type ShareAppOptions = {
 
 function shareClientIp(c: Context): string {
   return shareClientIpFromHeaders({
-    "cf-connecting-ip": c.req.header("cf-connecting-ip"),
-    "true-client-ip": c.req.header("true-client-ip"),
     "x-real-ip": c.req.header("x-real-ip"),
-    "x-forwarded-for": c.req.header("x-forwarded-for"),
   });
 }
 

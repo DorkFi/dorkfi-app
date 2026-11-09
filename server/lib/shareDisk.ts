@@ -1,4 +1,4 @@
-import { readdir, stat, unlink } from "node:fs/promises";
+import { readFile, readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 
@@ -23,6 +23,61 @@ export type ShareStoreUsage = {
   files: number;
   bytes: number;
 };
+
+let shareIndexLoadGate: Promise<void> | null = null;
+
+/** Test hook. Index reads wait on this promise before parsing index.json. */
+export function setShareIndexLoadGateForTests(gate: Promise<void> | null): void {
+  shareIndexLoadGate = gate;
+}
+
+export async function readShareIndex<T>(filePath: string): Promise<T | null> {
+  if (shareIndexLoadGate) await shareIndexLoadGate;
+  try {
+    const raw = await readFile(filePath, "utf8");
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One in-flight read. `loaded` flips only after `apply`, so a sweep that
+ * starts during the read waits instead of treating an empty index as complete.
+ */
+export function createShareIndexLoader<T>(opts: {
+  read: () => Promise<T | null>;
+  apply: (value: T | null) => void;
+}): { ensureLoaded: () => Promise<void>; reset: () => void } {
+  let loaded = false;
+  let pending: Promise<void> | null = null;
+  let generation = 0;
+
+  return {
+    ensureLoaded() {
+      if (loaded) return Promise.resolve();
+      if (!pending) {
+        const gen = generation;
+        pending = opts
+          .read()
+          .then((value) => {
+            if (gen !== generation) return;
+            opts.apply(value);
+            loaded = true;
+          })
+          .finally(() => {
+            if (gen === generation) pending = null;
+          });
+      }
+      return pending;
+    },
+    reset() {
+      generation += 1;
+      loaded = false;
+      pending = null;
+    },
+  };
+}
 
 let writeTail: Promise<void> = Promise.resolve();
 

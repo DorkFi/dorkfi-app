@@ -1,5 +1,3 @@
-import { endUserIp } from "../offramp/clientIp.js";
-
 /** Image bytes. Multipart framing may add a little on top of this. */
 export const SHARE_MAX_IMAGE_BYTES = 1024 * 1024;
 
@@ -79,22 +77,12 @@ export type ShareClientHeaders = {
 
 /**
  * Client address for the share-create rate limit.
- * Prefer the edge headers Railway / Cloudflare set. Fall back to
- * X-Forwarded-For only when those are absent (local proxy).
+ * Railway overwrites X-Real-IP and forwards CF-Connecting-IP, True-Client-IP,
+ * and X-Forwarded-For unchanged, so only X-Real-IP is safe to key on.
+ * Missing header shares one bucket instead of trusting a client-supplied address.
  */
 export function shareClientIpFromHeaders(headers: ShareClientHeaders): string {
-  const fromEdge = endUserIp({
-    headers: {
-      "cf-connecting-ip": headers["cf-connecting-ip"],
-      "true-client-ip": headers["true-client-ip"],
-      "x-real-ip": headers["x-real-ip"],
-    },
-  });
-  if (fromEdge !== "127.0.0.1") return fromEdge;
-  const forwarded = headers["x-forwarded-for"];
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return fromEdge;
+  const realIp = headers["x-real-ip"]?.split(",")[0]?.trim();
+  if (realIp) return realIp;
+  return "127.0.0.1";
 }

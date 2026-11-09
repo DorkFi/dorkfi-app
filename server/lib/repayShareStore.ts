@@ -2,7 +2,12 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import { randomUrlSafeString } from "./randomId.js";
-import { sweepIndexedShareDir, withShareWriteLock } from "./shareDisk.js";
+import {
+  createShareIndexLoader,
+  readShareIndex,
+  sweepIndexedShareDir,
+  withShareWriteLock,
+} from "./shareDisk.js";
 
 export type RepayShareRecord = {
   id: string;
@@ -17,7 +22,13 @@ export type RepayShareRecord = {
 type ShareIndex = Record<string, RepayShareRecord>;
 
 let index: ShareIndex = {};
-let loaded = false;
+
+const indexLoader = createShareIndexLoader<ShareIndex>({
+  read: () => readShareIndex<ShareIndex>(indexPath()),
+  apply: (value) => {
+    index = value ?? {};
+  },
+});
 
 function shareDir(): string {
   return config.repayShareStorePath;
@@ -31,16 +42,8 @@ function imagePath(id: string): string {
   return path.join(shareDir(), `${id}.png`);
 }
 
-async function ensureLoaded(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
-
-  try {
-    const raw = await readFile(indexPath(), "utf8");
-    index = JSON.parse(raw) as ShareIndex;
-  } catch {
-    index = {};
-  }
+function ensureLoaded(): Promise<void> {
+  return indexLoader.ensureLoaded();
 }
 
 async function persistIndex(): Promise<void> {
@@ -123,7 +126,7 @@ export async function sweepExpiredRepayShares(now = Date.now()): Promise<number>
 
 export function resetRepayShareStoreForTests(): void {
   index = {};
-  loaded = false;
+  indexLoader.reset();
 }
 
 export async function getRepayShareImage(

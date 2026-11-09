@@ -6,8 +6,13 @@ import type { Hono } from "hono";
 import { config } from "../../config.js";
 import { resetBorrowShareStoreForTests } from "../borrowShareStore.js";
 import { resetProfileShareStoreForTests } from "../profileShareStore.js";
-import { resetRepayShareStoreForTests } from "../repayShareStore.js";
+import {
+  getRepayShare,
+  resetRepayShareStoreForTests,
+  sweepExpiredRepayShares,
+} from "../repayShareStore.js";
 import { sweepAllShareStores } from "../shareExpirySweep.js";
+import { setShareIndexLoadGateForTests } from "../shareDisk.js";
 import {
   isPngBuffer,
   readShareField,
@@ -129,6 +134,7 @@ describe("share upload limits", () => {
   });
 
   afterEach(async () => {
+    setShareIndexLoadGateForTests(null);
     resetStores();
     for (const key of STORE_ENV) {
       const previous = previousEnv.get(key);
@@ -171,18 +177,22 @@ describe("share upload limits", () => {
     }
   });
 
-  it("uses the edge IP and falls back to X-Forwarded-For", () => {
+  it("rate-limits on X-Real-IP and ignores client-supplied forwarding headers", () => {
     expect(
       shareClientIpFromHeaders({
         "x-real-ip": "203.0.113.10",
+        "cf-connecting-ip": "198.51.100.8",
+        "true-client-ip": "198.51.100.9",
         "x-forwarded-for": "198.51.100.4",
       })
     ).toBe("203.0.113.10");
     expect(
       shareClientIpFromHeaders({
+        "cf-connecting-ip": "198.51.100.8",
+        "true-client-ip": "198.51.100.9",
         "x-forwarded-for": "198.51.100.4, 10.0.0.1",
       })
-    ).toBe("198.51.100.4");
+    ).toBe("127.0.0.1");
     expect(shareClientIpFromHeaders({})).toBe("127.0.0.1");
   });
 
@@ -327,6 +337,51 @@ describe("share upload limits", () => {
       const image = await app.request(`http://share.test${item.imagePath}`);
       expect(image.status).toBe(404);
     }
+  });
+
+  it("keeps an indexed PNG while the index is still loading", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    setShareIndexLoadGateForTests(gate);
+
+    const dir = path.join(root, "repay");
+    await mkdir(dir, { recursive: true });
+    const id = "livecard1";
+    const file = path.join(dir, `${id}.png`);
+    const now = Date.now();
+    await writeFile(file, MIN_PNG);
+    const old = new Date(now - 60 * 60 * 1000);
+    await utimes(file, old, old);
+    await writeFile(
+      path.join(dir, "index.json"),
+      JSON.stringify({
+        [id]: {
+          id,
+          amount: "1",
+          assetSymbol: "USDC",
+          createdAt: now - 60 * 60 * 1000,
+          expiresAt: now + DAY_MS,
+        },
+      })
+    );
+
+    let sweepSettled = false;
+    const loading = getRepayShare(id);
+    const sweeping = sweepExpiredRepayShares(now).then((count) => {
+      sweepSettled = true;
+      return count;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sweepSettled).toBe(false);
+    await expect(stat(file)).resolves.toBeTruthy();
+
+    release();
+    await expect(loading).resolves.toMatchObject({ id });
+    expect(await sweeping).toBe(0);
+    await expect(stat(file)).resolves.toBeTruthy();
   });
 
   it("deletes an unindexed PNG that is past the orphan age", async () => {
