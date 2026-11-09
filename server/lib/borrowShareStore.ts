@@ -2,6 +2,12 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import { randomUrlSafeString } from "./randomId.js";
+import {
+  createShareIndexLoader,
+  readShareIndex,
+  sweepIndexedShareDir,
+  withShareWriteLock,
+} from "./shareDisk.js";
 
 export type BorrowShareRecord = {
   id: string;
@@ -15,7 +21,13 @@ export type BorrowShareRecord = {
 type ShareIndex = Record<string, BorrowShareRecord>;
 
 let index: ShareIndex = {};
-let loaded = false;
+
+const indexLoader = createShareIndexLoader<ShareIndex>({
+  read: () => readShareIndex<ShareIndex>(indexPath()),
+  apply: (value) => {
+    index = value ?? {};
+  },
+});
 
 function shareDir(): string {
   return config.borrowShareStorePath;
@@ -29,16 +41,8 @@ function imagePath(id: string): string {
   return path.join(shareDir(), `${id}.png`);
 }
 
-async function ensureLoaded(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
-
-  try {
-    const raw = await readFile(indexPath(), "utf8");
-    index = JSON.parse(raw) as ShareIndex;
-  } catch {
-    index = {};
-  }
+function ensureLoaded(): Promise<void> {
+  return indexLoader.ensureLoaded();
 }
 
 async function persistIndex(): Promise<void> {
@@ -51,13 +55,15 @@ function isExpired(record: BorrowShareRecord): boolean {
 }
 
 async function removeShare(id: string): Promise<void> {
-  delete index[id];
-  await persistIndex();
-  try {
-    await unlink(imagePath(id));
-  } catch {
-    // image may already be gone
-  }
+  await withShareWriteLock(async () => {
+    delete index[id];
+    await persistIndex();
+    try {
+      await unlink(imagePath(id));
+    } catch {
+      // image may already be gone
+    }
+  });
 }
 
 export async function createBorrowShare(params: {
@@ -98,6 +104,24 @@ export async function getBorrowShare(
     return null;
   }
   return record;
+}
+
+export async function sweepExpiredBorrowShares(now = Date.now()): Promise<number> {
+  return withShareWriteLock(async () => {
+    await ensureLoaded();
+    return sweepIndexedShareDir({
+      dir: shareDir(),
+      index,
+      now,
+      imagePath,
+      persistIndex,
+    });
+  });
+}
+
+export function resetBorrowShareStoreForTests(): void {
+  index = {};
+  indexLoader.reset();
 }
 
 export async function getBorrowShareImage(
