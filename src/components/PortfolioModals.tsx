@@ -1,13 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- TODO: type modal state and API responses */
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import DepositModal from "./DepositModal";
-import WithdrawModal, {
-  type WithdrawModalSubmitResult,
-  type WithdrawPhasedSignPayload,
-  type WithdrawSubmitOptions,
-} from "./WithdrawModal";
+import WithdrawModal from "./WithdrawModal";
 import {
-  MainnetConsensusConfig,
   XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID,
 } from "@/services/xalgoConsensusAdapter";
 import BorrowModal from "./BorrowModal";
@@ -20,7 +15,6 @@ import MintModal from "./MintModal"; // Added MintModal import
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
-  withdraw,
   repay,
   repayAll,
   postRefreshMarketDataSnapshot,
@@ -46,8 +40,6 @@ import {
   tokenConfigHasAdapters,
   tokenStandardIsFolksAsaBridge,
   resolveTokenConfigFromDisplayToken,
-  FOLKS_MAINNET_ALGO_WITHDRAW,
-  isFolksAlgoWithdrawTwoStepEnabled,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -75,6 +67,7 @@ import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCa
 import { warmWithdrawModalRpc } from "@/utils/modalPrefetchHeavy";
 import { withRainbowkitHostDialogDismissed } from "@/wallet/xchainSignUi";
 import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
+import { useLendingWithdrawPhased } from "@/hooks/useLendingWithdrawPhased";
 
 /**
  * `buildPoolCollateralMarketRows` yields `liquidationThresholdPercent` as 0–100 (e.g. 85) or rarely
@@ -1345,337 +1338,21 @@ const PortfolioModals = ({
     };
   };
 
-  const resolvePortfolioWithdrawContext = () => {
-    if (!activeAccount?.address || !withdrawModal.asset) {
-      throw new Error("Connect your wallet and select an asset to withdraw.");
-    }
-
-    const deposit =
-      deposits.find(
-        (d) =>
-          d.asset === withdrawModal.asset &&
-          String(d.poolId ?? "") === String(withdrawModal.poolId ?? "") &&
-          (withdrawModal.marketId == null ||
-            withdrawModal.marketId === "" ||
-            String((d as Deposit).marketId ?? "") ===
-              String(withdrawModal.marketId)) &&
-          (withdrawModal.configSymbol == null ||
-            withdrawModal.configSymbol === "" ||
-            String((d as Deposit).configSymbol ?? "") ===
-              String(withdrawModal.configSymbol))
-      ) ??
-      (withdrawModal.poolId
-        ? (() => {
-            const candidates = deposits.filter(
-              (d) =>
-                d.asset === withdrawModal.asset &&
-                String(d.poolId ?? "") === String(withdrawModal.poolId)
-            );
-            return (
-              (withdrawModal.configSymbol
-                ? candidates.find(
-                    (c) =>
-                      String((c as Deposit).configSymbol ?? "") ===
-                      String(withdrawModal.configSymbol)
-                  )
-                : undefined) ?? candidates[0]
-            );
-          })()
-        : undefined) ??
-      deposits.find((d) => d.asset === withdrawModal.asset);
-
-    const networkToUse =
-      (withdrawModal.network ||
-        (deposit as any)?.network ||
-        currentNetwork) as NetworkId;
-
-    const tokens = getAllTokensWithDisplayInfo(networkToUse);
-    const token = resolveSupplyBorrowToken(
-      tokens,
-      withdrawModal.asset ?? "",
-      withdrawModal.poolId,
-      (deposit as Deposit)?.configSymbol ?? withdrawModal.configSymbol,
-      withdrawModal.marketId ?? ""
-    );
-
-    if (!token?.poolId || !token.underlyingContractId) {
-      throw new Error(
-        `Token not found for ${withdrawModal.asset}${
-          withdrawModal.poolId ? ` with poolId ${withdrawModal.poolId}` : ""
-        } on network ${networkToUse}`
-      );
-    }
-
-    const configLookupKey =
-      token.configKey ?? token.originalSymbol ?? withdrawModal.asset;
-    const originalTokenConfigRaw = getTokenConfig(networkToUse, configLookupKey);
-    if (!originalTokenConfigRaw) {
-      throw new Error(
-        `Token config not found for ${withdrawModal.asset} (configLookupKey: ${configLookupKey}) on network ${networkToUse}`
-      );
-    }
-
-    const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-      ? originalTokenConfigRaw.find(
-          (tc) => String(tc.poolId) === String(token.poolId)
-        ) || originalTokenConfigRaw[0]
-      : originalTokenConfigRaw;
-
-    if (!originalTokenConfig) {
-      throw new Error(
-        `Token config not found for ${withdrawModal.asset} with poolId ${token.poolId} on network ${networkToUse}`
-      );
-    }
-
-    return { networkToUse, token, originalTokenConfig };
-  };
-
-  const buildPortfolioWithdrawUnsigned = useCallback(
-    async (
-      amount: string,
-      options?: WithdrawSubmitOptions
-    ): Promise<WithdrawPhasedSignPayload> => {
-      const { networkToUse, token, originalTokenConfig } =
-        resolvePortfolioWithdrawContext();
-
-      const withdrawAllConfirmed = Boolean(options?.withdrawAllConfirmed);
-      const step2FolksRedeem =
-        Boolean(options?.folksTwoStepFolksRedeem) &&
-        options?.folksRedeemFAssetAtomic != null &&
-        String(options.folksRedeemFAssetAtomic).trim() !== "";
-      const withdrawAdapterTrimmed = String(options?.withdrawAdapterId ?? "").trim();
-      const useFolksWithdrawTwoStepStep1 =
-        !step2FolksRedeem &&
-        isFolksAlgoWithdrawTwoStepEnabled() &&
-        networkToUse === "algorand-mainnet" &&
-        withdrawAdapterTrimmed === FOLKS_MAINNET_ALGO_WITHDRAW.id;
-
-      const result = await withdraw(
-        token.poolId,
-        token.underlyingContractId,
-        originalTokenConfig.tokenStandard,
-        step2FolksRedeem ? "0" : amount,
-        activeAccount!.address,
-        networkToUse,
-        {
-          withdrawAll: step2FolksRedeem ? false : withdrawAllConfirmed,
-          maxWithdrawScaled:
-            !step2FolksRedeem &&
-            withdrawAllConfirmed &&
-            options?.isMaxWithdraw &&
-            maxWithdrawData?.maxWithdrawScaled
-              ? BigInt(maxWithdrawData.maxWithdrawScaled)
-              : undefined,
-          withdrawAdapterId: options?.withdrawAdapterId,
-          xalgoConsensusWithdrawAppendBurn:
-            options?.xalgoConsensusWithdrawAppendBurn,
-          ...(step2FolksRedeem
-            ? {
-                folksTwoStep: "folks_redeem_only" as const,
-                folksRedeemFAssetAtomic: String(options!.folksRedeemFAssetAtomic!).trim(),
-              }
-            : useFolksWithdrawTwoStepStep1
-              ? { folksTwoStep: "lending_to_wallet" as const }
-              : {}),
-        }
-      );
-
-      if (!result.success) {
-        if ((result as any).error) {
-          const message = String((result as any).error).toLowerCase();
-          if (message.includes("insufficient liquidity for withdraw")) {
-            throw new Error(message);
-          }
-          throw new Error((result as any).error || "Withdraw failed");
-        }
-        throw new Error("Withdraw failed");
-      }
-
-      if (!("txns" in result) || !result.txns?.length) {
-        throw new Error("No transactions returned from protocol; nothing to sign.");
-      }
-
-      const underlyingId =
-        token && typeof token === "object" && "underlyingAssetId" in token
-          ? (token as { underlyingAssetId?: string }).underlyingAssetId
-          : undefined;
-
-      const xBurn = Boolean(options?.xalgoConsensusWithdrawAppendBurn);
-
-      const wm = (result as { withdrawMeta?: unknown }).withdrawMeta as
-        | {
-            folksTwoStep: string;
-            fAssetToRedeemAtomic?: string;
-          }
-        | undefined;
-
-      return {
-        txnsB64: result.txns,
-        poolAppId: String(token.poolId),
-        marketContractId: String(token.underlyingContractId),
-        underlyingAssetId: underlyingId ?? null,
-        networkId: networkToUse,
-        txSignPreviewVariant: xBurn
-          ? "xalgo-withdraw-burn-combined"
-          : "lending",
-        governanceConsensusAppId: xBurn
-          ? String(MainnetConsensusConfig.consensusAppId)
-          : undefined,
-        assetDisplaySymbol: withdrawModal.asset ?? token.symbol,
-        amountHuman: amount,
-        folksTwoStepLendingToWallet:
-          wm?.folksTwoStep === "lending_to_wallet" &&
-          wm?.fAssetToRedeemAtomic != null &&
-          String(wm.fAssetToRedeemAtomic).trim() !== "",
-        fAssetToRedeemAtomic:
-          wm?.folksTwoStep === "lending_to_wallet"
-            ? String(wm?.fAssetToRedeemAtomic ?? "")
-            : undefined,
-        folksTwoStepPhase: step2FolksRedeem
-          ? ("folks_redeem_only" as const)
-          : useFolksWithdrawTwoStepStep1
-            ? ("lending_to_wallet" as const)
-            : undefined,
-      };
+  const { withdrawPhased: portfolioWithdrawPhased } = useLendingWithdrawPhased({
+    userAddress: activeAccount?.address,
+    currentNetwork,
+    target: {
+      asset: withdrawModal.asset,
+      poolId: withdrawModal.poolId,
+      marketId: withdrawModal.marketId,
+      configSymbol: withdrawModal.configSymbol,
+      network: withdrawModal.network,
     },
-    [
-      activeAccount?.address,
-      withdrawModal.asset,
-      withdrawModal.poolId,
-      withdrawModal.marketId,
-      withdrawModal.configSymbol,
-      withdrawModal.network,
-      deposits,
-      currentNetwork,
-      maxWithdrawData?.maxWithdrawScaled,
-    ]
-  );
-
-  const finalizePortfolioWithdrawSigned = useCallback(
-    async (
-      stxns: Uint8Array[],
-      built: WithdrawPhasedSignPayload
-    ): Promise<WithdrawModalSubmitResult> => {
-      try {
-        const { networkToUse, token } = resolvePortfolioWithdrawContext();
-
-        const algorandNetwork = getAlgorandNetworkFromNetworkId(
-          built.networkId as NetworkId
-        );
-        if (!algorandNetwork) {
-          throw new Error(`Invalid network: ${built.networkId}`);
-        }
-        const algorandClients =
-          await algorandService.initializeClientsForTransactions(
-            algorandNetwork
-          );
-        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-        await waitForConfirmation(
-          algorandClients.algod,
-          res.txid,
-          TX_CONFIRMATION_WAIT_ROUNDS
-        );
-
-        const decodedStxns = stxns.map((txn: Uint8Array) =>
-          algosdk.decodeSignedTransaction(txn)
-        );
-        const poolTxnID = decodedStxns
-          .slice()
-          .reverse()
-          .find(
-            (txn: any) =>
-              txn.txn.type === "appl" &&
-              Number(txn.txn.applicationCall?.appIndex) ===
-                parseInt(built.poolAppId, 10)
-          )
-          ?.txn.txID();
-
-        scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, networkToUse);
-
-        if (onRefreshWalletBalance && withdrawModal.asset) {
-          onRefreshWalletBalance(withdrawModal.asset);
-        }
-
-        if (activeAccount?.address) {
-          refreshPositionFromChain(
-            networkToUse,
-            token.poolId,
-            token.underlyingContractId
-          );
-          Promise.all([
-            dorkfiAPIService.fetchFreshUserData(
-              activeAccount.address,
-              networkToUse,
-              parseInt(token.poolId, 10),
-              parseInt(token.underlyingContractId, 10)
-            ),
-            fetchMarketInfoFromContract(
-              token.poolId,
-              token.underlyingContractId,
-              networkToUse as NetworkId
-            ),
-            dorkfiAPIService.fetchFreshUserHealth(
-              networkToUse,
-              parseInt(token.poolId, 10),
-              activeAccount.address
-            ),
-          ])
-            .then(() => {
-              refreshPositionFromChain(
-                networkToUse,
-                token.poolId,
-                token.underlyingContractId
-              );
-            })
-            .catch((error) => {
-              console.error(
-                "Error calling fetchFreshUserData after withdraw:",
-                error
-              );
-              refreshPositionFromChain(
-                networkToUse,
-                token.poolId,
-                token.underlyingContractId
-              );
-            });
-        }
-
-        return {
-          txId: res.txid,
-          skipSuccessModal: Boolean(
-            built.folksTwoStepLendingToWallet && built.fAssetToRedeemAtomic
-          ),
-          fAssetToRedeemAtomic: built.folksTwoStepLendingToWallet
-            ? built.fAssetToRedeemAtomic
-            : undefined,
-        };
-      } catch (error) {
-        console.error("Withdraw error:", error);
-        throw error;
-      }
-    },
-    [
-      activeAccount?.address,
-      withdrawModal.asset,
-      withdrawModal.poolId,
-      withdrawModal.marketId,
-      withdrawModal.configSymbol,
-      withdrawModal.network,
-      deposits,
-      currentNetwork,
-      onRefreshWalletBalance,
-      onRefreshMarket,
-      refreshPositionFromChain,
-    ]
-  );
-
-  const portfolioWithdrawPhased = useMemo(
-    () => ({
-      buildUnsignedGroup: buildPortfolioWithdrawUnsigned,
-      finalizeSignedGroup: finalizePortfolioWithdrawSigned,
-    }),
-    [buildPortfolioWithdrawUnsigned, finalizePortfolioWithdrawSigned]
-  );
+    deposits,
+    maxWithdrawScaled: maxWithdrawData?.maxWithdrawScaled,
+    onRefreshWalletBalance,
+    onRefreshPosition: refreshPositionFromChain,
+  });
 
   // Track if we've already fetched balance for this modal open/asset combination
   const lastFetchedRef = useRef<{ isOpen: boolean; asset: string | null }>({
