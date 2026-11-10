@@ -15,6 +15,7 @@ export const MIN_ALGORAND_ALGO_MICRO = 100_000n; // 0.1 ALGO
 
 const DEFAULT_ETH_AMOUNT_WEI = 100_000_000_000_000n; // 0.0001 ETH
 const DEFAULT_ALGO_MICRO = 1_000_000n; // 1 ALGO
+const DEFAULT_DAILY_MAX_DRIPS = 50;
 
 export type SponsorEnv = {
   enabled: boolean;
@@ -26,7 +27,20 @@ export type SponsorEnv = {
   algoMnemonic?: string;
   algoMicro: bigint;
   algodUrl: string;
+  /** Shared store for one-drip records and the daily budget. Required to send. */
+  redisUrl?: string;
+  dailyMaxDrips: number;
+  dailyMaxEthWei: bigint;
+  dailyMaxAlgoMicro: bigint;
 };
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  const t = raw?.trim();
+  if (!t || !/^\d+$/.test(t)) return fallback;
+  const n = Number(t);
+  if (!Number.isSafeInteger(n) || n <= 0) return fallback;
+  return n;
+}
 
 export function parseBoolFlag(raw: string | undefined): boolean {
   const v = raw?.trim().toLowerCase();
@@ -90,6 +104,19 @@ export function loadSponsorEnv(
       /\/+$/,
       ""
     ),
+    redisUrl: env.SPONSOR_REDIS_URL?.trim() || undefined,
+    dailyMaxDrips: parsePositiveInt(
+      env.SPONSOR_DAILY_MAX_DRIPS,
+      DEFAULT_DAILY_MAX_DRIPS
+    ),
+    dailyMaxEthWei: parsePositiveBigInt(
+      env.SPONSOR_DAILY_MAX_ETH_WEI,
+      BigInt(DEFAULT_DAILY_MAX_DRIPS) * DEFAULT_ETH_AMOUNT_WEI
+    ),
+    dailyMaxAlgoMicro: parsePositiveBigInt(
+      env.SPONSOR_DAILY_MAX_ALGO_MICRO,
+      BigInt(DEFAULT_DAILY_MAX_DRIPS) * DEFAULT_ALGO_MICRO
+    ),
   };
 }
 
@@ -101,5 +128,5 @@ export function isSponsorConfigured(env: SponsorEnv): boolean {
 }
 
 export function isSponsorLive(env: SponsorEnv): boolean {
-  return env.enabled && isSponsorConfigured(env);
+  return env.enabled && isSponsorConfigured(env) && Boolean(env.redisUrl);
 }

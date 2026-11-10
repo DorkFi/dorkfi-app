@@ -27,6 +27,10 @@ Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC*
 | `SPONSOR_ENABLED` | For sponsor | `true` to send dust Base ETH + Algorand ALGO to new Easy Start wallets |
 | `SPONSOR_ETH_PRIVATE_KEY` | For sponsor | Dedicated Base treasury private key (never `VITE_`) |
 | `SPONSOR_ALGO_MNEMONIC` | For sponsor | Dedicated Algorand 25-word mnemonic |
+| `SPONSOR_REDIS_URL` | For sponsor | Shared Redis URL. Required whenever sponsor sends are enabled. One record is shared by every instance |
+| `SPONSOR_DAILY_MAX_DRIPS` | No | New drips per UTC day. Defaults to `50` |
+| `SPONSOR_DAILY_MAX_ETH_WEI` | No | Daily ETH ceiling in wei. Defaults to 50 × the drip size |
+| `SPONSOR_DAILY_MAX_ALGO_MICRO` | No | Daily ALGO ceiling in microALGO. Defaults to 50 × the drip size |
 | `VITE_OFFRAMP_API_BASE` | No | Defaults to `/api/offramp` (Vite plugin in dev). Point at your API in production. |
 | `VITE_OFFRAMP_REDIRECT_URL` | No | Coinbase Offramp redirect (allowlist in CDP). Defaults to `{origin}/portfolio`. |
 | `XO_SWAP_APP_NAME` | For USDC move | Exodus XO Swap partner `App-Name` (server-only) |
@@ -81,11 +85,13 @@ The Vite plugin `plugins/sponsorApiPlugin.ts` serves:
 
 Off until `SPONSOR_ENABLED=true`. When a signed-in Easy Start wallet is below the Deposit to Earn floors (0.00005 ETH on Base / 0.1 spendable ALGO), the handler sends **0.0001 ETH** and **1 ALGO** from dedicated treasuries. The Algorand address is re-derived server-side; the EVM destination must match a Privy wallet on the JWT.
 
+Each user, Base address, and derived Algorand address gets one successful leg. Sweeping the wallet does not create another drip, and a second embedded wallet on the same Privy user does not either. A failed leg can be retried until it lands. Sends also stop at the daily drip count and the daily ETH and ALGO ceilings. If `SPONSOR_REDIS_URL` is missing or Redis cannot be read, the handler returns 503 and sends nothing.
+
 Pending Deposit to Earn is stored in `localStorage` for 7 days, keyed by Algorand address (this browser only). Login merges that job with `GET /api/easy-start/pending-deposit` so a second device can finish supply. PUT/DELETE keep the server copy in sync. The Savings banner resumes once the job is visible.
 
-Put treasury keys in `.env` (never `VITE_*`). Create dedicated treasuries — do not reuse personal or offramp keys. The client calls this on login and again before Deposit to Earn; a missed or failed send still falls through to the existing ETH/ALGO balance checks.
+Put treasury keys in `.env` (never `VITE_*`). Create dedicated treasuries — do not reuse personal or offramp keys. Keep only about one day of the budget in each treasury. The client calls this on login and again before Deposit to Earn; a missed or failed send still falls through to the existing ETH/ALGO balance checks.
 
-SimplFi production mounts the same handlers in `server/index.ts`. Railway/Docker only include this code after `dorkfi-app` is pushed and SimplFi `DORKFI_REF` is updated.
+SimplFi production mounts the same handlers in `server/index.ts`. The DorkFi share server does not. Railway/Docker only include this code after `dorkfi-app` is pushed and SimplFi `DORKFI_REF` is updated. Set `SPONSOR_REDIS_URL` on that service before enabling sends.
 
 ## Privy dashboard setup
 

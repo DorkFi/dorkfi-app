@@ -26,12 +26,19 @@ export class SponsorFundingError extends Error {
   }
 }
 
-/** A leg that actually left funds on the destination, or confirmed they were already there. */
+/**
+ * Whether login should stop retrying this leg.
+ * Sent and already-funded legs have gas. Already-sponsored and daily-budget
+ * skips will not pay again, so the balance check decides if a deposit can go on.
+ */
 export function isSponsorLegFunded(leg: SponsorLeg | null | undefined): boolean {
   if (!leg) return false;
+  if (leg.status === "sent") return true;
+  if (leg.status !== "skipped" || !leg.reason) return false;
   return (
-    leg.status === "sent" ||
-    (leg.status === "skipped" && leg.reason === "already_funded")
+    leg.reason === "already_funded" ||
+    leg.reason === "already_sponsored" ||
+    leg.reason === "daily_budget"
   );
 }
 

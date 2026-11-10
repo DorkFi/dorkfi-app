@@ -10,6 +10,9 @@ import {
 
 const funded: SponsorLeg = { status: "sent", txHash: "tx" };
 const already: SponsorLeg = { status: "skipped", reason: "already_funded" };
+const sponsored: SponsorLeg = { status: "skipped", reason: "already_sponsored" };
+const budget: SponsorLeg = { status: "skipped", reason: "daily_budget" };
+const pending: SponsorLeg = { status: "skipped", reason: "pending" };
 const disabled: SponsorLeg = { status: "skipped", reason: "disabled" };
 const failed: SponsorLeg = { status: "error", error: "Could not send ALGO" };
 
@@ -23,9 +26,12 @@ function result(eth: SponsorLeg, algo: SponsorLeg): SponsorResult {
 }
 
 describe("isSponsorLegFunded", () => {
-  it("treats sent and already_funded as complete", () => {
+  it("stops retrying after a send, a balance skip, or a durable cap", () => {
     expect(isSponsorLegFunded(funded)).toBe(true);
     expect(isSponsorLegFunded(already)).toBe(true);
+    expect(isSponsorLegFunded(sponsored)).toBe(true);
+    expect(isSponsorLegFunded(budget)).toBe(true);
+    expect(isSponsorLegFunded(pending)).toBe(false);
     expect(isSponsorLegFunded(disabled)).toBe(false);
     expect(isSponsorLegFunded(failed)).toBe(false);
   });
@@ -34,7 +40,10 @@ describe("isSponsorLegFunded", () => {
 describe("isSponsorFullyFunded", () => {
   it("requires both legs to have landed or already been funded", () => {
     expect(isSponsorFullyFunded(result(funded, already))).toBe(true);
+    expect(isSponsorFullyFunded(result(funded, sponsored))).toBe(true);
+    expect(isSponsorFullyFunded(result(budget, budget))).toBe(true);
     expect(isSponsorFullyFunded(result(funded, failed))).toBe(false);
+    expect(isSponsorFullyFunded(result(funded, pending))).toBe(false);
     expect(isSponsorFullyFunded(result(disabled, already))).toBe(false);
   });
 });
