@@ -42,6 +42,10 @@ DEV defaults the UI on when the flag is unset. `beta.dork.fi` also auto-enables 
    | `HAYSTACK_PROXY_HOST` | `0.0.0.0` |
    | `HAYSTACK_PROXY_PORT` | e.g. `8791` (or platform `$PORT`) |
    | `HAYSTACK_PROXY_CORS_ORIGINS` | `https://beta.dork.fi` (comma-separate more origins) |
+   | `HAYSTACK_PROXY_IP_RATE_MAX` | `30` requests per IP per window (optional) |
+   | `HAYSTACK_PROXY_GLOBAL_RATE_MAX` | `60` requests per window (optional) |
+   | `HAYSTACK_PROXY_DAILY_BUDGET` | `2000` upstream calls per UTC day (optional) |
+   | `HAYSTACK_PROXY_MAX_BODY_BYTES` | `131072` execute body cap (optional) |
 
    **Railway tip:** Railpack detects `bun.lockb` and runs
    `bun install --frozen-lockfile`, which fails when that lockfile is stale.
@@ -71,8 +75,11 @@ DEV defaults the UI on when the flag is unset. `beta.dork.fi` also auto-enables 
 ## Security notes
 
 - Anything prefixed `VITE_` is embedded in the client bundle. Never put the Haystack key there.
-- The standalone proxy rejects browser `Origin` values outside `HAYSTACK_PROXY_CORS_ORIGINS` (required when binding a non-loopback host). That stops casual quota abuse from other websites; it is not a full auth layer.
-- Client-supplied `apiKey` query/body fields and any client `X-API-Key` are dropped. The proxy sends `HAYSTACK_API_KEY` only in the upstream `X-API-Key` header. A `hay_sk_` secret in the URL is rejected by Haystack.
+- Quote and execute reject a missing `Origin` with `401` `{"error":"Origin required"}`. `GET /health` stays open for Railway. Origins outside `HAYSTACK_PROXY_CORS_ORIGINS` still get `403`.
+- An allowed `Origin` is only a header. The proxy also rate-limits both routes per IP and globally (`429`), caps the execute body (`413`), and stops calling Haystack after `HAYSTACK_PROXY_DAILY_BUDGET` upstream calls in a UTC day (`429`). The default global cap is 60 requests per minute, the shared free-tier quota, so the proxy stops before Haystack starts rejecting. Counters are in memory for one process: they reset on restart, and the daily cap also resets at UTC midnight. On Railway the per-IP key is `X-Real-IP` only.
+- The default daily budget is 2000 calls, about a few hundred repay sessions (quotes are debounced, plus one execute). Set it to the number of calls you can afford a script to burn. `0` stops forwarding.
+- Client-supplied `apiKey` query/body fields and any client `X-API-Key` are dropped. The proxy sends `HAYSTACK_API_KEY` only in the upstream `X-API-Key` header. Upstream JSON loses `apiKey` fields before the response is sent, and the key is not logged.
+- The local Vite middleware does not apply these caps. It is only on the dev machine.
 - Do not commit `.env` / `.env.local`.
 
 ## Related code
