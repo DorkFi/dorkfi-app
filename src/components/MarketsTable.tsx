@@ -20,6 +20,8 @@ import {
   resolveTokenForMarketPosition,
   getAlgorandNetworkFromNetworkId,
   tokenStandardUsesNativeWalletBalance,
+  tokenConfigHasAdapters,
+  tokenStandardIsFolksAsaBridge,
 } from "@/config";
 import { marketContractIdFromRowCacheKey } from "@/hooks/useOnDemandMarketData";
 import { ARC200Service } from "@/services/arc200Service";
@@ -80,10 +82,12 @@ import {
 } from "@/utils/walletBalanceRpc";
 import {
   getRpcReadCache,
+  invalidateRpcReadCache,
   invalidateUserPositionRpcCache,
 } from "@/utils/rpcReadCache";
 import { LazyModalFallback } from "@/components/LazySuspenseFallback";
 import { useToast } from "@/hooks/use-toast";
+import { useLendingWithdrawPhased } from "@/hooks/useLendingWithdrawPhased";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import algosdk, { waitForConfirmation } from "algosdk";
 import { abi, CONTRACT } from "ulujs";
@@ -464,10 +468,26 @@ const MarketsTable = () => {
     configSymbol: undefined,
     marketId: undefined,
   });
-  const [withdrawModal, setWithdrawModal] = useState({
+  const [withdrawModal, setWithdrawModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+    marketRowKey?: string;
+    configSymbol?: string;
+    marketId?: string;
+  }>({
     isOpen: false,
     asset: null,
   });
+  const [marketWithdrawQuote, setMarketWithdrawQuote] = useState<{
+    depositHuman: number;
+    borrowHuman: number;
+    maxWithdrawUnderlying: number | null;
+    maxWithdrawScaled: string | null;
+  } | null>(null);
+  const [marketWithdrawQuoteLoading, setMarketWithdrawQuoteLoading] =
+    useState(false);
+  const [marketWithdrawRefresh, setMarketWithdrawRefresh] = useState(0);
   const [borrowModal, setBorrowModal] = useState<{
     isOpen: boolean;
     asset: string | null;
@@ -1273,8 +1293,24 @@ const MarketsTable = () => {
     }
   };
 
-  const handleWithdrawClick = (asset: string) => {
-    setWithdrawModal({ isOpen: true, asset });
+  const handleWithdrawClick = (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    const marketId =
+      marketContractIdFromMarketRowKey(marketRowKey) ??
+      resolveTokenForDisplayedAsset(asset, poolId, marketRowKey)
+        ?.underlyingContractId;
+    setWithdrawModal({
+      isOpen: true,
+      asset,
+      poolId,
+      marketRowKey,
+      configSymbol,
+      marketId,
+    });
   };
 
   const handleBorrowClick = (
@@ -1655,6 +1691,7 @@ const MarketsTable = () => {
 
   const handleCloseWithdrawModal = () => {
     setWithdrawModal({ isOpen: false, asset: null });
+    setMarketWithdrawQuote(null);
   };
 
   const handleCloseBorrowModal = () => {
@@ -3619,6 +3656,109 @@ const MarketsTable = () => {
     // fetch/setState loop while the detail modal stayed open.
   ]);
 
+  useEffect(() => {
+    if (!withdrawModal.isOpen || !withdrawModal.asset || !activeAccount?.address) {
+      setMarketWithdrawQuote(null);
+      setMarketWithdrawQuoteLoading(false);
+      return;
+    }
+    const token = resolveTokenForDisplayedAsset(
+      withdrawModal.asset,
+      withdrawModal.poolId,
+      withdrawModal.marketRowKey
+    );
+    if (!token?.poolId || !token.underlyingContractId) {
+      setMarketWithdrawQuote({
+        depositHuman: 0,
+        borrowHuman: 0,
+        maxWithdrawUnderlying: null,
+        maxWithdrawScaled: null,
+      });
+      setMarketWithdrawQuoteLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setMarketWithdrawQuoteLoading(true);
+    const userAddress = activeAccount.address;
+    const poolId = token.poolId;
+    const marketId = token.underlyingContractId;
+    Promise.all([
+      fetchUserDepositBalance(userAddress, poolId, marketId, currentNetwork),
+      fetchUserBorrowBalance(userAddress, poolId, marketId, currentNetwork),
+      getMaxWithdrawableForMarket(
+        poolId,
+        marketId,
+        userAddress,
+        currentNetwork,
+        token.decimals ?? 6
+      ),
+    ])
+      .then(([depositData, borrowData, maxData]) => {
+        if (cancelled) return;
+        setMarketWithdrawQuote({
+          depositHuman: depositData?.balance ?? 0,
+          borrowHuman: borrowData?.balance ?? 0,
+          maxWithdrawUnderlying: maxData?.maxWithdrawUnderlying ?? null,
+          maxWithdrawScaled: maxData?.maxWithdrawScaled?.toString() ?? null,
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to load market withdraw balance:", error);
+        if (!cancelled) {
+          setMarketWithdrawQuote({
+            depositHuman: 0,
+            borrowHuman: 0,
+            maxWithdrawUnderlying: null,
+            maxWithdrawScaled: null,
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMarketWithdrawQuoteLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    withdrawModal.isOpen,
+    withdrawModal.asset,
+    withdrawModal.poolId,
+    withdrawModal.marketRowKey,
+    activeAccount?.address,
+    currentNetwork,
+    resolveTokenForDisplayedAsset,
+    marketWithdrawRefresh,
+  ]);
+
+  const marketWithdrawToken = withdrawModal.asset
+    ? resolveTokenForDisplayedAsset(
+        withdrawModal.asset,
+        withdrawModal.poolId,
+        withdrawModal.marketRowKey
+      )
+    : undefined;
+  const { withdrawPhased: marketWithdrawPhased } = useLendingWithdrawPhased({
+    userAddress: activeAccount?.address,
+    currentNetwork,
+    target: {
+      asset: withdrawModal.asset,
+      poolId: marketWithdrawToken?.poolId ?? withdrawModal.poolId,
+      marketId:
+        marketWithdrawToken?.underlyingContractId ?? withdrawModal.marketId,
+      configSymbol:
+        withdrawModal.configSymbol ??
+        marketWithdrawToken?.configKey ??
+        marketWithdrawToken?.originalSymbol,
+      network: currentNetwork,
+    },
+    maxWithdrawScaled: marketWithdrawQuote?.maxWithdrawScaled,
+    onRefreshPosition: () => {
+      if (activeAccount?.address) {
+        invalidateUserPositionRpcCache(currentNetwork, activeAccount.address);
+      }
+    },
+  });
+
   return (
     <div className="max-w-[1200px] mx-auto px-4 pt-0">
       <div className="space-y-2 sm:space-y-3">
@@ -4084,7 +4224,13 @@ const MarketsTable = () => {
                 detailModal.marketRowKey
               )
             }
-            onWithdraw={() => handleWithdrawClick(detailModal.asset!)}
+            onWithdraw={() =>
+              handleWithdrawClick(
+                detailModal.asset!,
+                detailModal.poolId,
+                detailModal.marketRowKey
+              )
+            }
             onBorrow={() =>
               handleBorrowClick(
                 detailModal.asset!,
@@ -4198,15 +4344,86 @@ const MarketsTable = () => {
         {withdrawModal.isOpen &&
           withdrawModal.asset &&
           (() => {
-            const assetData = getAssetData(withdrawModal.asset);
-            return assetData ? (
+            const assetData = getAssetData(
+              withdrawModal.asset,
+              withdrawModal.poolId,
+              withdrawModal.marketRowKey
+            );
+            if (!assetData) return null;
+            const configKey =
+              marketWithdrawToken?.configKey ??
+              marketWithdrawToken?.originalSymbol ??
+              withdrawModal.asset;
+            const rawTc = getTokenConfig(
+              currentNetwork as NetworkId,
+              configKey
+            );
+            const tokenConfig = Array.isArray(rawTc)
+              ? rawTc.find(
+                  (c) =>
+                    String(c.poolId) ===
+                    String(marketWithdrawToken?.poolId ?? withdrawModal.poolId)
+                ) ?? rawTc[0]
+              : rawTc;
+            const folksWithdrawAdapters = tokenConfig
+              ? getFolksAdaptersForPhase(tokenConfig, "withdraw")
+              : [];
+            const withdrawAmountIsUnderlying =
+              folksWithdrawAdapters.length > 0 &&
+              tokenConfig != null &&
+              tokenStandardIsFolksAsaBridge(tokenConfig.tokenStandard);
+            // Market detail only signs a plain ASA withdraw (COOP and the same
+            // class). Folks unit conversion and the xALGO ALGO burn stay on the
+            // portfolio modal, which already passes those options.
+            const marketWithdrawSymbol = String(
+              withdrawModal.asset ?? marketWithdrawToken?.symbol ?? ""
+            ).toUpperCase();
+            const plainAsaMarketWithdraw =
+              tokenConfig != null &&
+              tokenConfig.tokenStandard === "asa" &&
+              !tokenConfigHasAdapters(tokenConfig) &&
+              marketWithdrawSymbol !== "XALGO" &&
+              String(withdrawModal.configSymbol ?? "").toUpperCase() !==
+                "XALGO" &&
+              String(marketWithdrawToken?.configKey ?? "").toUpperCase() !==
+                "XALGO" &&
+              String(marketWithdrawToken?.originalSymbol ?? "").toUpperCase() !==
+                "XALGO";
+            const deposited =
+              marketWithdrawQuote?.depositHuman != null &&
+              Number.isFinite(marketWithdrawQuote.depositHuman)
+                ? marketWithdrawQuote.depositHuman
+                : 0;
+            const marketBorrow = marketWithdrawQuote?.borrowHuman ?? 0;
+            return (
               <WithdrawModal
                 isOpen={withdrawModal.isOpen}
                 onClose={handleCloseWithdrawModal}
                 tokenSymbol={withdrawModal.asset}
                 tokenIcon={assetData.icon}
-                tokenDecimals={assetData.decimals ?? 8}
-                currentlyDeposited={1000}
+                tokenDecimals={
+                  marketWithdrawToken?.decimals ?? assetData.decimals ?? 6
+                }
+                currentlyDeposited={deposited}
+                isLoading={marketWithdrawQuoteLoading}
+                poolId={marketWithdrawToken?.poolId ?? withdrawModal.poolId}
+                network={currentNetwork}
+                poolHasNoBorrows={
+                  marketBorrow === 0 &&
+                  (!userGlobalData?.totalBorrowValue ||
+                    userGlobalData.totalBorrowValue === 0)
+                }
+                disableHealthFactorWithdrawSafety={
+                  tokenConfig != null && tokenConfigHasAdapters(tokenConfig)
+                }
+                withdrawAmountIsUnderlying={withdrawAmountIsUnderlying}
+                folksWithdrawAdapters={folksWithdrawAdapters}
+                maxWithdrawUnderlying={
+                  marketWithdrawQuote?.maxWithdrawUnderlying ?? undefined
+                }
+                withdrawPhased={
+                  plainAsaMarketWithdraw ? marketWithdrawPhased : undefined
+                }
                 marketStats={{
                   supplyAPY: assetData.supplyAPY,
                   borrowAPY: assetData.borrowAPY,
@@ -4229,10 +4446,14 @@ const MarketsTable = () => {
                       currentNetwork,
                       activeAccount.address
                     );
+                    invalidateRpcReadCache(
+                      `maxWithdraw:${currentNetwork}:${marketWithdrawToken?.poolId ?? withdrawModal.poolId}:`
+                    );
                   }
+                  setMarketWithdrawRefresh((n) => n + 1);
                 }}
               />
-            ) : null;
+            );
           })()}
 
         {/* Borrow Modal */}

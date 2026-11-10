@@ -1139,11 +1139,9 @@ const WithdrawModal = ({
           setShowSuccess(true);
         }
       } else {
-        console.log(`Withdraw ${amount !== "" ? amount.toString() : ""} ${tokenSymbol}`);
-
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        setSuccessTxId(null);
-        setShowSuccess(true);
+        throw new Error(
+          "Withdraw is not connected on this screen. Use your portfolio to withdraw."
+        );
       }
     } catch (error) {
       console.error("Withdraw failed:", error);
