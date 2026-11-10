@@ -4372,6 +4372,23 @@ const MarketsTable = () => {
               folksWithdrawAdapters.length > 0 &&
               tokenConfig != null &&
               tokenStandardIsFolksAsaBridge(tokenConfig.tokenStandard);
+            // Market detail only signs a plain ASA withdraw (COOP and the same
+            // class). Folks unit conversion and the xALGO ALGO burn stay on the
+            // portfolio modal, which already passes those options.
+            const marketWithdrawSymbol = String(
+              withdrawModal.asset ?? marketWithdrawToken?.symbol ?? ""
+            ).toUpperCase();
+            const plainAsaMarketWithdraw =
+              tokenConfig != null &&
+              tokenConfig.tokenStandard === "asa" &&
+              !tokenConfigHasAdapters(tokenConfig) &&
+              marketWithdrawSymbol !== "XALGO" &&
+              String(withdrawModal.configSymbol ?? "").toUpperCase() !==
+                "XALGO" &&
+              String(marketWithdrawToken?.configKey ?? "").toUpperCase() !==
+                "XALGO" &&
+              String(marketWithdrawToken?.originalSymbol ?? "").toUpperCase() !==
+                "XALGO";
             const deposited =
               marketWithdrawQuote?.depositHuman != null &&
               Number.isFinite(marketWithdrawQuote.depositHuman)
@@ -4404,7 +4421,9 @@ const MarketsTable = () => {
                 maxWithdrawUnderlying={
                   marketWithdrawQuote?.maxWithdrawUnderlying ?? undefined
                 }
-                withdrawPhased={marketWithdrawPhased}
+                withdrawPhased={
+                  plainAsaMarketWithdraw ? marketWithdrawPhased : undefined
+                }
                 marketStats={{
                   supplyAPY: assetData.supplyAPY,
                   borrowAPY: assetData.borrowAPY,
