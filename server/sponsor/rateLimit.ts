@@ -2,7 +2,10 @@ export type RateLimiter = {
   allow: (key: string, now?: number) => boolean;
 };
 
-/** Sliding window of `max` hits per `windowMs`. In-memory; one process. */
+/**
+ * Burst control only. The durable cap lives in the sponsor ledger.
+ * Sliding window of `max` hits per `windowMs`. In-memory; one process.
+ */
 export function createRateLimiter(opts: {
   max: number;
   windowMs: number;
