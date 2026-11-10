@@ -27,7 +27,7 @@
  *   HAYSTACK_API_BASE                    (default https://hayrouter.txnlab.dev)
  *   HAYSTACK_PROXY_IP_RATE_MAX           (default 30 requests / window / IP)
  *   HAYSTACK_PROXY_IP_RATE_WINDOW_MS     (default 60000)
- *   HAYSTACK_PROXY_GLOBAL_RATE_MAX       (default 120 requests / window)
+ *   HAYSTACK_PROXY_GLOBAL_RATE_MAX       (default 60 requests / window)
  *   HAYSTACK_PROXY_GLOBAL_RATE_WINDOW_MS (default 60000)
  *   HAYSTACK_PROXY_DAILY_BUDGET          (default 2000 upstream calls / UTC day)
  *   HAYSTACK_PROXY_MAX_BODY_BYTES        (default 131072)
@@ -40,7 +40,8 @@ import { pathToFileURL } from "node:url";
 export const HAYSTACK_PROXY_DEFAULTS = {
   ipRateMax: 30,
   ipRateWindowMs: 60_000,
-  globalRateMax: 120,
+  /** Shared free-tier quota. The proxy stops before Haystack starts rejecting. */
+  globalRateMax: 60,
   globalRateWindowMs: 60_000,
   /** A few hundred repay sessions. Burning it is the loss limit for a script. */
   dailyBudget: 2_000,
