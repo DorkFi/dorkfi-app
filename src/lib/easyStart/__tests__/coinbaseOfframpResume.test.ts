@@ -66,15 +66,15 @@ describe("coinbase offramp pending storage", () => {
     expect(store.has(CB_OFFRAMP_PENDING_KEY)).toBe(false);
   });
 
-  it("resumes from the return query when session storage is empty", () => {
+  it("does not resume from a return query when session storage is empty", () => {
+    const replaced: string[] = [];
     const pending = consumeCoinbaseOfframpReturn({
-      href: "https://beta.simplfi.xyz/portfolio?cb_offramp=1&ref=privy-user-1",
-      replaceUrl: () => {},
+      href: "https://beta.simplfi.xyz/portfolio?cb_offramp=1&ref=privy-attacker",
+      replaceUrl: (next) => replaced.push(next),
     });
-    expect(pending).toMatchObject({
-      partnerUserRef: "privy-user-1",
-      amount: null,
-    });
+    expect(pending).toBeNull();
+    expect(replaced).toEqual(["/portfolio"]);
+    expect(store.has(CB_OFFRAMP_PENDING_KEY)).toBe(false);
   });
 
   it("resumes from the return URL and strips the query", () => {
@@ -122,6 +122,7 @@ describe("coinbase offramp pending storage", () => {
       partnerUserRef: "privy-user-1",
       amount: "40",
     });
+    expect(readCoinbaseOfframpPending()?.partnerUserRef).toBe("privy-user-1");
   });
 
   it("does not reopen cash-out from leftover storage alone", () => {

@@ -327,6 +327,31 @@ export function EasyStartWithdrawSheet({
   const cashOutAmount =
     amount.trim() ||
     (hasAvailable ? maxNum.toFixed(6).replace(/\.?0+$/, "") : null);
+  const sessionAmountNum = Number(cashOutAmount);
+  const sessionAmountValid =
+    Boolean(cashOutAmount?.trim()) &&
+    Number.isFinite(sessionAmountNum) &&
+    sessionAmountNum > 0;
+  const sessionAmountDisplay = legacyUsdc
+    ? formatCurrency(sessionAmountValid ? sessionAmountNum : 0, "USD", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : formatAlgoAmount(
+        formatNumber,
+        sessionAmountValid ? sessionAmountNum : 0
+      );
+  const cashOutReviewDisplay =
+    !legacyUsdc && destination === "algorand_wallet"
+      ? amountDisplay
+      : sessionAmountDisplay;
+  const reviewUsdEstimate =
+    !legacyUsdc &&
+    destination !== "algorand_wallet" &&
+    algoUsd > 0 &&
+    sessionAmountValid
+      ? sessionAmountNum * algoUsd
+      : usdEstimate;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -375,10 +400,10 @@ export function EasyStartWithdrawSheet({
                 onBack={() => setStep("choose")}
                 title={
                   legacyUsdc
-                    ? `Cash out ${amountDisplay}`
+                    ? `Cash out ${cashOutReviewDisplay}`
                     : destination === "algorand_wallet"
-                      ? `Send ${amountDisplay}`
-                      : `Cash out ${amountDisplay}`
+                      ? `Send ${cashOutReviewDisplay}`
+                      : `Cash out ${cashOutReviewDisplay}`
                 }
                 subtitle={
                   destination === "algorand_wallet" && !legacyUsdc
@@ -404,7 +429,7 @@ export function EasyStartWithdrawSheet({
                 />
                 <ReviewBreakdown
                   amountLabel="Amount"
-                  amountValue={amountDisplay}
+                  amountValue={cashOutReviewDisplay}
                   feeLabel={
                     !legacyUsdc && destination === "algorand_wallet"
                       ? "Network fee"
@@ -420,13 +445,13 @@ export function EasyStartWithdrawSheet({
                       ? "You'll send"
                       : "You'll cash out"
                   }
-                  receiveValue={amountDisplay}
+                  receiveValue={cashOutReviewDisplay}
                   footnote={reviewFootnote}
                 />
-                {usdEstimate != null ? (
+                {reviewUsdEstimate != null ? (
                   <p className="text-center text-xs text-muted-foreground">
                     About{" "}
-                    {formatCurrency(usdEstimate, "USD", {
+                    {formatCurrency(reviewUsdEstimate, "USD", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
@@ -445,7 +470,7 @@ export function EasyStartWithdrawSheet({
                         Sending…
                       </>
                     ) : (
-                      `Send ${amountDisplay}`
+                      `Send ${cashOutReviewDisplay}`
                     )}
                   </FundingPrimaryButton>
                 ) : (
@@ -458,8 +483,8 @@ export function EasyStartWithdrawSheet({
                     hideProviderPicker
                     ctaLabel={
                       legacyUsdc
-                        ? `Cash out ${amountDisplay} to ${methodTitle}`
-                        : `Cash out ${amountDisplay} to ${methodTitle}`
+                        ? `Cash out ${cashOutReviewDisplay} to ${methodTitle}`
+                        : `Cash out ${cashOutReviewDisplay} to ${methodTitle}`
                     }
                     asset={legacyUsdc ? "USDC" : "ALGO"}
                     cashoutMethod={legacyUsdc ? undefined : cashoutMethod}

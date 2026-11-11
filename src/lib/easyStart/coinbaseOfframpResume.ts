@@ -147,11 +147,6 @@ export function consumeCoinbaseOfframpReturn(opts?: {
     (typeof document !== "undefined" ? document.referrer : "");
   const fromCoinbase = isCoinbaseOfframpReferrer(referrer);
 
-  if (!parsed && !fromCoinbase) return null;
-
-  const partnerUserRef = stored?.partnerUserRef || parsed?.partnerUserRef;
-  if (!partnerUserRef) return null;
-
   if (parsed) {
     url.searchParams.delete(CB_OFFRAMP_QUERY);
     url.searchParams.delete(CB_OFFRAMP_REF_QUERY);
@@ -165,12 +160,9 @@ export function consumeCoinbaseOfframpReturn(opts?: {
     replace(next);
   }
 
-  return saveCoinbaseOfframpPending({
-    partnerUserRef,
-    amount: stored?.amount ?? null,
-    sendTxHash: stored?.sendTxHash ?? null,
-    asset: stored?.asset,
-    cashoutMethod: stored?.cashoutMethod,
-    at: stored?.at,
-  });
+  // The query ref is never stored and never polled. A return URL can only
+  // reopen the record this tab saved before leaving for Coinbase.
+  if (!stored) return null;
+  if (!parsed && !fromCoinbase) return null;
+  return stored;
 }

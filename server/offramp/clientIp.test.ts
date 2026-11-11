@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   coinbaseClientIp,
+  coinbaseStatusRefForUser,
   endUserIp,
   isPrivateOrLoopbackIp,
   partnerUserRefFromUserId,
@@ -82,5 +83,23 @@ describe("partnerUserRefFromUserId", () => {
     expect(ref.startsWith("privy-")).toBe(true);
     expect(ref.length).toBeLessThanOrEqual(50);
     expect(partnerUserRefFromUserId(id)).toBe(ref);
+  });
+});
+
+describe("coinbaseStatusRefForUser", () => {
+  const userA = "did:privy:user-a";
+  const userB = "did:privy:user-b";
+
+  it("allows only that user's ref", () => {
+    const own = partnerUserRefFromUserId(userA);
+    expect(coinbaseStatusRefForUser(userA, own)).toBe(own);
+    expect(coinbaseStatusRefForUser(userA, encodeURIComponent(own))).toBe(own);
+  });
+
+  it("rejects another user's ref, an algo ref, and a malformed ref", () => {
+    expect(coinbaseStatusRefForUser(userA, partnerUserRefFromUserId(userB))).toBeNull();
+    expect(coinbaseStatusRefForUser(userA, `algo-${"ab".repeat(20)}`)).toBeNull();
+    expect(coinbaseStatusRefForUser(userA, "")).toBeNull();
+    expect(coinbaseStatusRefForUser(userA, "%")).toBeNull();
   });
 });

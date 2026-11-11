@@ -139,6 +139,15 @@ export async function createWalletCoinbaseSession(args: {
 /** @deprecated Use createCoinbaseSession */
 export const createCoinbaseOfframpSession = createCoinbaseSession;
 
+export class OfframpStatusForbiddenError extends Error {
+  readonly status = 403;
+
+  constructor() {
+    super("Forbidden");
+    this.name = "OfframpStatusForbiddenError";
+  }
+}
+
 export async function fetchCoinbaseOfframpStatus(
   partnerUserRef: string,
   accessToken: string
@@ -147,6 +156,9 @@ export async function fetchCoinbaseOfframpStatus(
     `${offrampBase()}/coinbase/status/${encodeURIComponent(partnerUserRef)}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
+  if (res.status === 403) {
+    throw new OfframpStatusForbiddenError();
+  }
   return parseJson(res);
 }
 
@@ -207,6 +219,87 @@ export function parseCoinbaseAmount(amt: unknown): string | null {
 export function coinbaseSellAmount(tx: CoinbaseSellTx | null): string | null {
   if (!tx) return null;
   return parseCoinbaseAmount(tx.sell_amount ?? tx.sellAmount);
+}
+
+export function coinbaseFromAddress(tx: CoinbaseSellTx | null): string | null {
+  if (!tx) return null;
+  const addr = tx.from_address || tx.fromAddress;
+  if (typeof addr !== "string") return null;
+  const trimmed = addr.trim();
+  return trimmed || null;
+}
+
+export function coinbaseFromAddressMatches(
+  tx: CoinbaseSellTx | null,
+  connected: string | null | undefined,
+  kind: "evm" | "algorand"
+): boolean {
+  const from = coinbaseFromAddress(tx);
+  const wallet = connected?.trim();
+  if (!from || !wallet) return false;
+  if (kind === "algorand") return from === wallet;
+  return from.toLowerCase() === wallet.toLowerCase();
+}
+
+/** Absolute tolerance is one atomic unit for both ALGO and USDC. */
+export function coinbaseAmountsMatch(expected: string, actual: string): boolean {
+  const left = Number(expected);
+  const right = Number(actual);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) {
+    return false;
+  }
+  return Math.abs(left - right) <= 0.000001;
+}
+
+export type CoinbaseCashOutDecision =
+  | { action: "wait" }
+  | { action: "reject"; reason: "from_address" }
+  | {
+      action: "confirm";
+      to: string;
+      amount: string;
+      amountMatches: boolean;
+    };
+
+/**
+ * Decide whether a polled sale may be shown for confirmation.
+ * This never authorizes a broadcast. The sheet sends only after the user confirms.
+ */
+export function evaluateCoinbaseCashOutSale(args: {
+  tx: CoinbaseSellTx | null;
+  kind: "evm" | "algorand";
+  connectedAddress: string | null | undefined;
+  expectedAmount?: string | null;
+}): CoinbaseCashOutDecision {
+  const from = coinbaseFromAddress(args.tx);
+  const connected = args.connectedAddress?.trim();
+  if (
+    from &&
+    connected &&
+    !coinbaseFromAddressMatches(args.tx, connected, args.kind)
+  ) {
+    return { action: "reject", reason: "from_address" };
+  }
+
+  const to = coinbaseDepositAddress(args.tx, args.kind);
+  const amount = coinbaseSellAmount(args.tx);
+  if (
+    !to ||
+    !amount ||
+    !from ||
+    !connected ||
+    !coinbaseFromAddressMatches(args.tx, connected, args.kind)
+  ) {
+    return { action: "wait" };
+  }
+
+  const expected = args.expectedAmount?.trim() ?? "";
+  return {
+    action: "confirm",
+    to,
+    amount,
+    amountMatches: expected.length === 0 || coinbaseAmountsMatch(expected, amount),
+  };
 }
 
 export function moonpayPublishableKey(): string | null {
