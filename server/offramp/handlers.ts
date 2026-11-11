@@ -309,6 +309,8 @@ const PUBLIC_COINBASE_SELL_KEYS = [
   "toAddress",
   "from_address",
   "fromAddress",
+  "tx_hash",
+  "txHash",
 ] as const;
 
 class CdpStatusError extends Error {

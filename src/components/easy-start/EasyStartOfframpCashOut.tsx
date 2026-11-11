@@ -16,7 +16,7 @@ import {
 } from "@/components/easy-start/EasyStartCardProviderPicker";
 import {
   createCoinbaseOfframpSession,
-  evaluateCoinbaseCashOutSale,
+  selectCoinbaseCashOutSale,
   fetchCoinbaseOfframpStatus,
   fetchOfframpHealth,
   moonpayPublishableKey,
@@ -60,13 +60,7 @@ type CashOutPhase =
 type ReadyCoinbaseSale = {
   to: string;
   amount: string;
-  amountMatches: boolean;
 };
-
-function shortDestination(address: string): string {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
 
 interface EasyStartOfframpCashOutProps {
   evmAddress: string | null;
@@ -292,7 +286,7 @@ export function EasyStartOfframpCashOut({
   );
 
   const confirmCoinbaseSend = useCallback(async () => {
-    if (!readySale?.amountMatches || confirmLock.current) return;
+    if (!readySale || confirmLock.current) return;
     confirmLock.current = true;
     try {
       if (asset === "ALGO") await sendAlgoTo(readySale.to, readySale.amount);
@@ -320,29 +314,19 @@ export function EasyStartOfframpCashOut({
       try {
         const accessToken = await getAccessToken();
         if (!accessToken || cancelled) return;
-        const { latest } = await fetchCoinbaseOfframpStatus(
+        const { transactions, latest } = await fetchCoinbaseOfframpStatus(
           partnerUserRef,
           accessToken
         );
         if (cancelled) return;
-        const decision = evaluateCoinbaseCashOutSale({
-          tx: latest,
+        const decision = selectCoinbaseCashOutSale({
+          transactions: transactions?.length ? transactions : latest ? [latest] : [],
           kind,
           connectedAddress,
           expectedAmount: readCoinbaseOfframpPending()?.amount ?? null,
         });
-        if (decision.action === "reject") {
-          stopWithoutSending(
-            "This sale is for a different wallet. Nothing was sent."
-          );
-          return;
-        }
         if (decision.action === "confirm") {
-          setReadySale({
-            to: decision.to,
-            amount: decision.amount,
-            amountMatches: decision.amountMatches,
-          });
+          setReadySale({ to: decision.to, amount: decision.amount });
           setPhase("confirm");
           return;
         }
@@ -562,18 +546,12 @@ export function EasyStartOfframpCashOut({
 
         {phase === "confirm" && readySale ? (
           <div className="space-y-2 text-center">
-            <p className="text-sm text-foreground">
-              Send {readySale.amount} {asset} to {shortDestination(readySale.to)}.
+            <p className="break-all text-sm text-foreground">
+              Send {readySale.amount} {asset} to {readySale.to}.
             </p>
-            {readySale.amountMatches ? (
-              <p className="text-sm text-muted-foreground">
-                Review the amount and destination, then confirm. Nothing is sent until you do.
-              </p>
-            ) : (
-              <p className="text-sm text-destructive" role="alert">
-                Coinbase is asking for {readySale.amount} {asset}, which is not the amount you started. Nothing was sent.
-              </p>
-            )}
+            <p className="text-sm text-muted-foreground">
+              Review the amount and destination, then confirm. Nothing is sent until you do.
+            </p>
           </div>
         ) : null}
 
@@ -609,14 +587,11 @@ export function EasyStartOfframpCashOut({
           </Button>
         ) : phase === "confirm" && readySale ? (
           <Button
-            className="h-auto min-h-12 w-full whitespace-normal rounded-xl bg-ocean-teal py-3 text-center text-base font-semibold text-white hover:bg-ocean-teal/90"
-            disabled={
-              !readySale.amountMatches ||
-              (asset === "ALGO" ? !algorandAddress : !evmAddress)
-            }
+            className="h-auto min-h-12 w-full whitespace-normal break-all rounded-xl bg-ocean-teal py-3 text-center text-base font-semibold text-white hover:bg-ocean-teal/90"
+            disabled={asset === "ALGO" ? !algorandAddress : !evmAddress}
             onClick={() => void confirmCoinbaseSend()}
           >
-            Send {readySale.amount} {asset} to {shortDestination(readySale.to)}
+            Send {readySale.amount} {asset} to {readySale.to}
           </Button>
         ) : phase === "gas" ? (
           <>

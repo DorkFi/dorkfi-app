@@ -3,10 +3,10 @@ import {
   coinbaseDepositAddress,
   coinbaseFromAddress,
   coinbaseSellAmount,
-  evaluateCoinbaseCashOutSale,
   fetchCoinbaseOfframpStatus,
   OfframpStatusForbiddenError,
   parseCoinbaseAmount,
+  selectCoinbaseCashOutSale,
   type CoinbaseSellTx,
 } from "@/lib/easyStart/offrampApi";
 
@@ -78,82 +78,116 @@ const ALGO = "47YPQTIGQEO7T4Y4RWDYWEKV6RTR2UNBQXBABEEGM72ESWDQNCQ52OPASU";
 const OTHER_ALGO = "VCMJKWOY5P5P7SKMZFFOCEROPJCZOTIJMNIYNUCKH7LRO45JMJP6UYBIJA";
 const BASE = "0x0b59d1001629c86da136a0B480Db68EDBf70e222";
 
-describe("evaluateCoinbaseCashOutSale", () => {
-  const algoSale = {
+describe("selectCoinbaseCashOutSale", () => {
+  const openSale = {
+    status: "TRANSACTION_STATUS_STARTED",
     sell_amount: { value: "12.5", currency: "ALGO" },
     to_address: ALGO,
     from_address: ALGO,
   } satisfies CoinbaseSellTx;
 
-  it("waits when the sell amount or from_address is missing", () => {
+  it("waits when the sell amount, from_address, or stored amount is missing", () => {
     expect(
-      evaluateCoinbaseCashOutSale({
-        tx: { to_address: ALGO, from_address: ALGO },
+      selectCoinbaseCashOutSale({
+        transactions: [{ ...openSale, sell_amount: undefined }],
         kind: "algorand",
         connectedAddress: ALGO,
+        expectedAmount: "12.5",
       }).action
     ).toBe("wait");
     expect(
-      evaluateCoinbaseCashOutSale({
-        tx: { ...algoSale, from_address: undefined },
+      selectCoinbaseCashOutSale({
+        transactions: [{ ...openSale, from_address: undefined }],
         kind: "algorand",
         connectedAddress: ALGO,
+        expectedAmount: "12.5",
+      }).action
+    ).toBe("wait");
+    expect(
+      selectCoinbaseCashOutSale({
+        transactions: [openSale],
+        kind: "algorand",
+        connectedAddress: ALGO,
+        expectedAmount: null,
       }).action
     ).toBe("wait");
     expect(coinbaseFromAddress({ to_address: ALGO })).toBeNull();
   });
 
-  it("rejects a from_address that is not the connected wallet", () => {
+  it("keeps polling when an older row has a different from_address", () => {
     expect(
-      evaluateCoinbaseCashOutSale({
-        tx: { ...algoSale, from_address: OTHER_ALGO },
+      selectCoinbaseCashOutSale({
+        transactions: [{ ...openSale, from_address: OTHER_ALGO }],
         kind: "algorand",
         connectedAddress: ALGO,
+        expectedAmount: "12.5",
       })
-    ).toEqual({ action: "reject", reason: "from_address" });
+    ).toEqual({ action: "wait" });
   });
 
-  it("asks for confirmation and does not treat the sale as a send", () => {
-    expect(
-      evaluateCoinbaseCashOutSale({
-        tx: algoSale,
-        kind: "algorand",
-        connectedAddress: ALGO,
-        expectedAmount: "12.50",
-      })
-    ).toEqual({
+  it("skips a finished sale and confirms the open sale with the stored amount", () => {
+    const decision = selectCoinbaseCashOutSale({
+      transactions: [
+        {
+          status: "TRANSACTION_STATUS_SUCCESS",
+          sell_amount: { value: "12.5", currency: "ALGO" },
+          to_address: OTHER_ALGO,
+          from_address: OTHER_ALGO,
+          tx_hash: "OLD",
+        },
+        openSale,
+      ],
+      kind: "algorand",
+      connectedAddress: ALGO,
+      expectedAmount: "12.50",
+    });
+    expect(decision).toEqual({
       action: "confirm",
       to: ALGO,
       amount: "12.5",
-      amountMatches: true,
     });
   });
 
-  it("keeps confirmation disabled when the sale amount differs from the amount started", () => {
-    const decision = evaluateCoinbaseCashOutSale({
-      tx: algoSale,
-      kind: "algorand",
-      connectedAddress: ALGO,
-      expectedAmount: "1",
-    });
-    expect(decision).toMatchObject({ action: "confirm", amountMatches: false });
+  it("waits when the open sale amount differs from the amount started", () => {
+    expect(
+      selectCoinbaseCashOutSale({
+        transactions: [openSale],
+        kind: "algorand",
+        connectedAddress: ALGO,
+        expectedAmount: "1",
+      })
+    ).toEqual({ action: "wait" });
+  });
+
+  it("waits when the matching sale already has a transaction hash", () => {
+    expect(
+      selectCoinbaseCashOutSale({
+        transactions: [{ ...openSale, tx_hash: "ALREADY_SENT" }],
+        kind: "algorand",
+        connectedAddress: ALGO,
+        expectedAmount: "12.5",
+      }).action
+    ).toBe("wait");
   });
 
   it("matches a Base from_address case-insensitively", () => {
-    const decision = evaluateCoinbaseCashOutSale({
-      tx: {
-        sell_amount: "25.00",
-        to_address: BASE,
-        from_address: BASE.toUpperCase(),
-      },
+    const decision = selectCoinbaseCashOutSale({
+      transactions: [
+        {
+          status: "TRANSACTION_STATUS_CREATED",
+          sell_amount: "25.00",
+          to_address: BASE,
+          from_address: BASE.toUpperCase(),
+        },
+      ],
       kind: "evm",
       connectedAddress: BASE.toLowerCase(),
+      expectedAmount: "25",
     });
     expect(decision).toEqual({
       action: "confirm",
       to: BASE,
       amount: "25.00",
-      amountMatches: true,
     });
   });
 });

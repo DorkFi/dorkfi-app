@@ -35,6 +35,8 @@ export type CoinbaseSellTx = {
   network?: string;
   from_address?: string;
   fromAddress?: string;
+  tx_hash?: string;
+  txHash?: string;
   [key: string]: unknown;
 };
 
@@ -251,55 +253,51 @@ export function coinbaseAmountsMatch(expected: string, actual: string): boolean 
   return Math.abs(left - right) <= 0.000001;
 }
 
+/**
+ * Statuses where Coinbase is still waiting for the crypto deposit.
+ * SUCCESS, FAILED, and EXPIRED already finished. A hash means the send happened.
+ */
+const COINBASE_SELL_AWAITING_DEPOSIT = new Set([
+  "TRANSACTION_STATUS_CREATED",
+  "TRANSACTION_STATUS_STARTED",
+]);
+
+export function coinbaseSellAwaitingDeposit(tx: CoinbaseSellTx | null): boolean {
+  if (!tx) return false;
+  const status = typeof tx.status === "string" ? tx.status.trim() : "";
+  if (!COINBASE_SELL_AWAITING_DEPOSIT.has(status)) return false;
+  const hash = tx.tx_hash ?? tx.txHash;
+  return typeof hash !== "string" || hash.trim().length === 0;
+}
+
 export type CoinbaseCashOutDecision =
   | { action: "wait" }
-  | { action: "reject"; reason: "from_address" }
-  | {
-      action: "confirm";
-      to: string;
-      amount: string;
-      amountMatches: boolean;
-    };
+  | { action: "confirm"; to: string; amount: string };
 
 /**
- * Decide whether a polled sale may be shown for confirmation.
- * This never authorizes a broadcast. The sheet sends only after the user confirms.
+ * Pick the open sale that matches the amount stored before the Coinbase redirect.
+ * Older rows are skipped. This never authorizes a broadcast.
  */
-export function evaluateCoinbaseCashOutSale(args: {
-  tx: CoinbaseSellTx | null;
+export function selectCoinbaseCashOutSale(args: {
+  transactions: Array<CoinbaseSellTx | null> | null | undefined;
   kind: "evm" | "algorand";
   connectedAddress: string | null | undefined;
   expectedAmount?: string | null;
 }): CoinbaseCashOutDecision {
-  const from = coinbaseFromAddress(args.tx);
-  const connected = args.connectedAddress?.trim();
-  if (
-    from &&
-    connected &&
-    !coinbaseFromAddressMatches(args.tx, connected, args.kind)
-  ) {
-    return { action: "reject", reason: "from_address" };
-  }
-
-  const to = coinbaseDepositAddress(args.tx, args.kind);
-  const amount = coinbaseSellAmount(args.tx);
-  if (
-    !to ||
-    !amount ||
-    !from ||
-    !connected ||
-    !coinbaseFromAddressMatches(args.tx, connected, args.kind)
-  ) {
-    return { action: "wait" };
-  }
-
   const expected = args.expectedAmount?.trim() ?? "";
-  return {
-    action: "confirm",
-    to,
-    amount,
-    amountMatches: expected.length === 0 || coinbaseAmountsMatch(expected, amount),
-  };
+  if (!expected) return { action: "wait" };
+
+  for (const tx of args.transactions ?? []) {
+    if (!tx || !coinbaseSellAwaitingDeposit(tx)) continue;
+    const amount = coinbaseSellAmount(tx);
+    if (!amount || !coinbaseAmountsMatch(expected, amount)) continue;
+    if (!coinbaseFromAddressMatches(tx, args.connectedAddress, args.kind)) continue;
+    const to = coinbaseDepositAddress(tx, args.kind);
+    if (!to) continue;
+    return { action: "confirm", to, amount };
+  }
+
+  return { action: "wait" };
 }
 
 export function moonpayPublishableKey(): string | null {
