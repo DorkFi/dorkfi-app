@@ -35,6 +35,8 @@ export type CoinbaseSellTx = {
   network?: string;
   from_address?: string;
   fromAddress?: string;
+  tx_hash?: string;
+  txHash?: string;
   [key: string]: unknown;
 };
 
@@ -139,6 +141,15 @@ export async function createWalletCoinbaseSession(args: {
 /** @deprecated Use createCoinbaseSession */
 export const createCoinbaseOfframpSession = createCoinbaseSession;
 
+export class OfframpStatusForbiddenError extends Error {
+  readonly status = 403;
+
+  constructor() {
+    super("Forbidden");
+    this.name = "OfframpStatusForbiddenError";
+  }
+}
+
 export async function fetchCoinbaseOfframpStatus(
   partnerUserRef: string,
   accessToken: string
@@ -147,6 +158,9 @@ export async function fetchCoinbaseOfframpStatus(
     `${offrampBase()}/coinbase/status/${encodeURIComponent(partnerUserRef)}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
+  if (res.status === 403) {
+    throw new OfframpStatusForbiddenError();
+  }
   return parseJson(res);
 }
 
@@ -207,6 +221,83 @@ export function parseCoinbaseAmount(amt: unknown): string | null {
 export function coinbaseSellAmount(tx: CoinbaseSellTx | null): string | null {
   if (!tx) return null;
   return parseCoinbaseAmount(tx.sell_amount ?? tx.sellAmount);
+}
+
+export function coinbaseFromAddress(tx: CoinbaseSellTx | null): string | null {
+  if (!tx) return null;
+  const addr = tx.from_address || tx.fromAddress;
+  if (typeof addr !== "string") return null;
+  const trimmed = addr.trim();
+  return trimmed || null;
+}
+
+export function coinbaseFromAddressMatches(
+  tx: CoinbaseSellTx | null,
+  connected: string | null | undefined,
+  kind: "evm" | "algorand"
+): boolean {
+  const from = coinbaseFromAddress(tx);
+  const wallet = connected?.trim();
+  if (!from || !wallet) return false;
+  if (kind === "algorand") return from === wallet;
+  return from.toLowerCase() === wallet.toLowerCase();
+}
+
+/** Absolute tolerance is one atomic unit for both ALGO and USDC. */
+export function coinbaseAmountsMatch(expected: string, actual: string): boolean {
+  const left = Number(expected);
+  const right = Number(actual);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) {
+    return false;
+  }
+  return Math.abs(left - right) <= 0.000001;
+}
+
+/**
+ * Statuses where Coinbase is still waiting for the crypto deposit.
+ * SUCCESS, FAILED, and EXPIRED already finished. A hash means the send happened.
+ */
+const COINBASE_SELL_AWAITING_DEPOSIT = new Set([
+  "TRANSACTION_STATUS_CREATED",
+  "TRANSACTION_STATUS_STARTED",
+]);
+
+export function coinbaseSellAwaitingDeposit(tx: CoinbaseSellTx | null): boolean {
+  if (!tx) return false;
+  const status = typeof tx.status === "string" ? tx.status.trim() : "";
+  if (!COINBASE_SELL_AWAITING_DEPOSIT.has(status)) return false;
+  const hash = tx.tx_hash ?? tx.txHash;
+  return typeof hash !== "string" || hash.trim().length === 0;
+}
+
+export type CoinbaseCashOutDecision =
+  | { action: "wait" }
+  | { action: "confirm"; to: string; amount: string };
+
+/**
+ * Pick the open sale that matches the amount stored before the Coinbase redirect.
+ * Older rows are skipped. This never authorizes a broadcast.
+ */
+export function selectCoinbaseCashOutSale(args: {
+  transactions: Array<CoinbaseSellTx | null> | null | undefined;
+  kind: "evm" | "algorand";
+  connectedAddress: string | null | undefined;
+  expectedAmount?: string | null;
+}): CoinbaseCashOutDecision {
+  const expected = args.expectedAmount?.trim() ?? "";
+  if (!expected) return { action: "wait" };
+
+  for (const tx of args.transactions ?? []) {
+    if (!tx || !coinbaseSellAwaitingDeposit(tx)) continue;
+    const amount = coinbaseSellAmount(tx);
+    if (!amount || !coinbaseAmountsMatch(expected, amount)) continue;
+    if (!coinbaseFromAddressMatches(tx, args.connectedAddress, args.kind)) continue;
+    const to = coinbaseDepositAddress(tx, args.kind);
+    if (!to) continue;
+    return { action: "confirm", to, amount };
+  }
+
+  return { action: "wait" };
 }
 
 export function moonpayPublishableKey(): string | null {

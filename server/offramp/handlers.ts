@@ -23,6 +23,7 @@ import {
 import { assertPrivyOwnsXchainAddress } from "./xchainBind.ts";
 import {
   coinbaseClientIp,
+  coinbaseStatusRefForUser,
   isPrivateOrLoopbackIp,
   partnerUserRefFromUserId,
 } from "./clientIp.ts";
@@ -298,46 +299,121 @@ export async function handleCoinbaseSession(
   }
 }
 
+const PUBLIC_COINBASE_SELL_KEYS = [
+  "status",
+  "asset",
+  "network",
+  "sell_amount",
+  "sellAmount",
+  "to_address",
+  "toAddress",
+  "from_address",
+  "fromAddress",
+  "tx_hash",
+  "txHash",
+] as const;
+
+class CdpStatusError extends Error {
+  status: number;
+  body: Record<string, unknown>;
+
+  constructor(
+    status: number,
+    message: string,
+    body: Record<string, unknown>
+  ) {
+    super(message);
+    this.status = status;
+    this.body = body;
+  }
+}
+
+export function publicCoinbaseSellTx(
+  tx: unknown
+): Record<string, unknown> | null {
+  if (!tx || typeof tx !== "object" || Array.isArray(tx)) return null;
+  const source = tx as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of PUBLIC_COINBASE_SELL_KEYS) {
+    if (source[key] != null) out[key] = source[key];
+  }
+  return out;
+}
+
+function publicSellList(data: Record<string, unknown>): Array<Record<string, unknown>> {
+  const list = data.transactions ?? data.sells;
+  if (!Array.isArray(list)) return [];
+  return list
+    .map(publicCoinbaseSellTx)
+    .filter((tx): tx is Record<string, unknown> => tx != null);
+}
+
+async function loadCoinbaseSells(
+  env: OfframpEnv,
+  ref: string
+): Promise<Record<string, unknown>> {
+  const path = `/onramp/v1/sell/user/${encodeURIComponent(ref)}/transactions`;
+  const jwt = await cdpBearer(env, "GET", path);
+  const url = new URL(`https://${CDP_HOST}${path}`);
+  url.searchParams.set("page_size", "5");
+
+  const upstream = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  const data = parseCdpBody(await upstream.text());
+  if (!upstream.ok) {
+    throw new CdpStatusError(
+      upstream.status || 502,
+      cdpFailureMessage(upstream.status || 502, data, "Status fetch failed"),
+      data
+    );
+  }
+  return data;
+}
+
+export type CoinbaseStatusDeps = {
+  authenticate?: (
+    req: IncomingMessage,
+    privyAppId: string | undefined
+  ) => Promise<{ userId: string }>;
+  loadSells?: (
+    env: OfframpEnv,
+    ref: string
+  ) => Promise<Record<string, unknown>>;
+};
+
 export async function handleCoinbaseStatus(
   req: IncomingMessage,
   res: ServerResponse,
   env: OfframpEnv,
-  partnerUserRef: string
+  partnerUserRef: string,
+  deps?: CoinbaseStatusDeps
 ): Promise<void> {
+  const authenticate = deps?.authenticate ?? requirePrivyAuth;
+  const loadSells = deps?.loadSells ?? loadCoinbaseSells;
   try {
-    if (!(await ensurePrivyUser(req, res, env))) return;
-    const ref = decodeURIComponent(partnerUserRef).trim();
+    const { userId } = await authenticate(req, env.privyAppId);
+    const ref = coinbaseStatusRefForUser(userId, partnerUserRef);
     if (!ref) {
-      sendJson(res, 400, { error: "partnerUserRef required" });
+      sendJson(res, 403, { error: "Forbidden" });
       return;
     }
-    const path = `/onramp/v1/sell/user/${encodeURIComponent(ref)}/transactions`;
-    const jwt = await cdpBearer(env, "GET", path);
-    const url = new URL(`https://${CDP_HOST}${path}`);
-    url.searchParams.set("page_size", "5");
 
-    const upstream = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${jwt}` },
+    const data = await loadSells(env, ref);
+    const transactions = publicSellList(data);
+    sendJson(res, 200, {
+      transactions,
+      latest: transactions[0] ?? null,
     });
-    const data = parseCdpBody(await upstream.text());
-    if (!upstream.ok) {
-      sendJson(res, upstream.status || 502, {
-        error: cdpFailureMessage(
-          upstream.status || 502,
-          data,
-          "Status fetch failed"
-        ),
-        raw: data,
-      });
+  } catch (e: unknown) {
+    if (e instanceof AuthError) {
+      sendJson(res, e.status, { error: e.message });
       return;
     }
-
-    const transactions = (data.transactions ??
-      data.sells ??
-      []) as Array<Record<string, unknown>>;
-    const latest = transactions[0] ?? null;
-    sendJson(res, 200, { transactions, latest });
-  } catch (e: unknown) {
+    if (e instanceof CdpStatusError) {
+      sendJson(res, e.status, { error: e.message, raw: e.body });
+      return;
+    }
     const message = e instanceof Error ? e.message : String(e);
     sendJson(res, 500, { error: message });
   }

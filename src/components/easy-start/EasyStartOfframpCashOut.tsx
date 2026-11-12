@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import {
   useFundWallet,
   usePrivy,
@@ -15,12 +15,12 @@ import {
   type CardProvider,
 } from "@/components/easy-start/EasyStartCardProviderPicker";
 import {
-  coinbaseDepositAddress,
-  coinbaseSellAmount,
   createCoinbaseOfframpSession,
+  selectCoinbaseCashOutSale,
   fetchCoinbaseOfframpStatus,
   fetchOfframpHealth,
   moonpayPublishableKey,
+  OfframpStatusForbiddenError,
   signMoonpayWidgetUrl,
   type OfframpHealth,
 } from "@/lib/easyStart/offrampApi";
@@ -34,6 +34,7 @@ import {
 import {
   clearCoinbaseOfframpPending,
   patchCoinbaseOfframpPending,
+  readCoinbaseOfframpPending,
   saveCoinbaseOfframpPending,
 } from "@/lib/easyStart/coinbaseOfframpResume";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
@@ -51,9 +52,15 @@ type CashOutPhase =
   | "opening"
   | "gas"
   | "awaiting_provider"
+  | "confirm"
   | "sending"
   | "done"
   | "error";
+
+type ReadyCoinbaseSale = {
+  to: string;
+  amount: string;
+};
 
 interface EasyStartOfframpCashOutProps {
   evmAddress: string | null;
@@ -87,7 +94,7 @@ function isUserCanceledFunding(message: string): boolean {
 /**
  * In-app cash-out after Base USDC arrives:
  * - Coinbase: CDP session → same-tab sell widget → return to /portfolio →
- *   poll to_address → Privy USDC transfer
+ *   poll this user's sale → confirm amount and destination → Privy transfer
  * - MoonPay: sell widget + signed URL → onInitiateDeposit → Privy USDC transfer
  *
  * MoonPay’s React SDK is lazy-mounted only while the sell overlay is open so it
@@ -131,8 +138,10 @@ export function EasyStartOfframpCashOut({
   const [phase, setPhase] = useState<CashOutPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [partnerUserRef, setPartnerUserRef] = useState<string | null>(null);
+  const [readySale, setReadySale] = useState<ReadyCoinbaseSale | null>(null);
   const [moonpayVisible, setMoonpayVisible] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const confirmLock = useRef(false);
 
   const moonpayKey = moonpayPublishableKey();
   const address = evmAddress as Address | null;
@@ -251,6 +260,8 @@ export function EasyStartOfframpCashOut({
     clearCoinbaseOfframpPending();
     onResumeConsumed?.();
     setPartnerUserRef(null);
+    setReadySale(null);
+    confirmLock.current = false;
     setPhase("idle");
   }, [onResumeConsumed]);
 
@@ -261,40 +272,72 @@ export function EasyStartOfframpCashOut({
     );
   }, []);
 
-  // Poll Coinbase for deposit address after widget session starts.
+  const stopWithoutSending = useCallback(
+    (message: string) => {
+      clearCoinbaseOfframpPending();
+      onResumeConsumed?.();
+      setPartnerUserRef(null);
+      setReadySale(null);
+      confirmLock.current = false;
+      setError(message);
+      setPhase("error");
+    },
+    [onResumeConsumed]
+  );
+
+  const confirmCoinbaseSend = useCallback(async () => {
+    if (!readySale || confirmLock.current) return;
+    confirmLock.current = true;
+    try {
+      if (asset === "ALGO") await sendAlgoTo(readySale.to, readySale.amount);
+      else await sendUsdcTo(readySale.to, readySale.amount);
+    } catch (e: unknown) {
+      confirmLock.current = false;
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      setPhase("error");
+    }
+  }, [asset, readySale, sendAlgoTo, sendUsdcTo]);
+
+  // Poll Coinbase for this user's sale. Signing waits for an explicit confirm.
   useEffect(() => {
     if (provider !== "coinbase" || !partnerUserRef) return;
     if (phase !== "awaiting_provider") return;
 
     let cancelled = false;
+    let timer: number | undefined;
     const started = Date.now();
+    const kind = asset === "ALGO" ? "algorand" : "evm";
+    const connectedAddress = asset === "ALGO" ? algorandAddress : evmAddress;
+
     const tick = async () => {
       try {
         const accessToken = await getAccessToken();
         if (!accessToken || cancelled) return;
-        const { latest } = await fetchCoinbaseOfframpStatus(
+        const { transactions, latest } = await fetchCoinbaseOfframpStatus(
           partnerUserRef,
           accessToken
         );
-        const to = coinbaseDepositAddress(
-          latest,
-          asset === "ALGO" ? "algorand" : "evm"
-        );
-        const sellAmt = coinbaseSellAmount(latest) || amount;
-        if (to && sellAmt && !cancelled) {
-          try {
-            if (asset === "ALGO") await sendAlgoTo(to, sellAmt);
-            else await sendUsdcTo(to, sellAmt);
-          } catch (e: unknown) {
-            if (cancelled) return;
-            const message = e instanceof Error ? e.message : String(e);
-            setError(message);
-            setPhase("error");
-          }
+        if (cancelled) return;
+        const decision = selectCoinbaseCashOutSale({
+          transactions: transactions?.length ? transactions : latest ? [latest] : [],
+          kind,
+          connectedAddress,
+          expectedAmount: readCoinbaseOfframpPending()?.amount ?? null,
+        });
+        if (decision.action === "confirm") {
+          setReadySale({ to: decision.to, amount: decision.amount });
+          setPhase("confirm");
           return;
         }
-      } catch {
-        // keep polling until timeout
+      } catch (e: unknown) {
+        if (cancelled) return;
+        if (e instanceof OfframpStatusForbiddenError) {
+          stopWithoutSending(
+            "This cash-out doesn’t belong to this account. Nothing was sent."
+          );
+          return;
+        }
       }
       if (cancelled) return;
       if (Date.now() - started > 30 * 60 * 1000) {
@@ -302,13 +345,23 @@ export function EasyStartOfframpCashOut({
         setPhase("error");
         return;
       }
-      window.setTimeout(() => void tick(), 4000);
+      timer = window.setTimeout(() => void tick(), 4000);
     };
     void tick();
     return () => {
       cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
     };
-  }, [amount, asset, getAccessToken, partnerUserRef, phase, provider, sendAlgoTo, sendUsdcTo]);
+  }, [
+    algorandAddress,
+    asset,
+    evmAddress,
+    getAccessToken,
+    partnerUserRef,
+    phase,
+    provider,
+    stopWithoutSending,
+  ]);
 
   const startCoinbase = async () => {
     if (asset === "ALGO" ? !algorandAddress : !evmAddress) return;
@@ -484,11 +537,22 @@ export function EasyStartOfframpCashOut({
         {phase === "awaiting_provider" && provider === "coinbase" ? (
           <p className="text-sm text-muted-foreground text-center">
             {consumerCopy
-              ? "Waiting for cash-out details. Confirm the send when prompted."
+              ? "Waiting for cash-out details. You’ll review the amount and destination before anything is sent."
               : asset === "ALGO"
-                ? "Waiting for Coinbase sell details. Confirm the ALGO send when prompted."
-                : "Waiting for Coinbase sell details. Confirm the USDC send when prompted."}
+                ? "Waiting for Coinbase sell details. You’ll review the ALGO amount and destination before anything is sent."
+                : "Waiting for Coinbase sell details. You’ll review the USDC amount and destination before anything is sent."}
           </p>
+        ) : null}
+
+        {phase === "confirm" && readySale ? (
+          <div className="space-y-2 text-center">
+            <p className="break-all text-sm text-foreground">
+              Send {readySale.amount} {asset} to {readySale.to}.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Review the amount and destination, then confirm. Nothing is sent until you do.
+            </p>
+          </div>
         ) : null}
 
         {phase === "sending" ? (
@@ -520,6 +584,14 @@ export function EasyStartOfframpCashOut({
             onClick={() => finishCashOut()}
           >
             Done
+          </Button>
+        ) : phase === "confirm" && readySale ? (
+          <Button
+            className="h-auto min-h-12 w-full whitespace-normal break-all rounded-xl bg-ocean-teal py-3 text-center text-base font-semibold text-white hover:bg-ocean-teal/90"
+            disabled={asset === "ALGO" ? !algorandAddress : !evmAddress}
+            onClick={() => void confirmCoinbaseSend()}
+          >
+            Send {readySale.amount} {asset} to {readySale.to}
           </Button>
         ) : phase === "gas" ? (
           <>
@@ -563,13 +635,14 @@ export function EasyStartOfframpCashOut({
           </Button>
         )}
 
-        {phase === "awaiting_provider" && provider === "coinbase" ? (
+        {(phase === "awaiting_provider" || phase === "confirm") &&
+        provider === "coinbase" ? (
           <Button
             variant="ghost"
             className="w-full"
             onClick={cancelCoinbaseWait}
           >
-            Cancel wait
+            {phase === "confirm" ? "Cancel" : "Cancel wait"}
           </Button>
         ) : null}
       </div>

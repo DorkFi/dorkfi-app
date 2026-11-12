@@ -117,3 +117,21 @@ export function partnerUserRefFromUserId(userId: string): string {
   const ref = compact || "privy-user";
   return ref.slice(0, 50);
 }
+
+/**
+ * Ref the status route may look up for this user.
+ * Returns null for an empty, malformed, or foreign ref, including an `algo-` ref.
+ */
+export function coinbaseStatusRefForUser(
+  userId: string,
+  requestedRef: string
+): string | null {
+  let ref: string;
+  try {
+    ref = decodeURIComponent(requestedRef).trim();
+  } catch {
+    return null;
+  }
+  if (!ref || ref !== partnerUserRefFromUserId(userId)) return null;
+  return ref;
+}
