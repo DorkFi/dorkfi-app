@@ -21,6 +21,7 @@ import {
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { afterOverlayClose, useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { isPortaledWalletPickerUi } from "@/lib/isPortaledWalletPickerUi";
 import { cn } from "@/lib/utils";
 
 interface WalletModalProps {
@@ -451,7 +452,15 @@ const WalletModal: React.FC<WalletModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-6 max-h-[90vh] overflow-y-auto relative">
+      <DialogContent
+        className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-6 max-h-[90vh] overflow-y-auto relative"
+        onInteractOutside={(event) => {
+          if (isPortaledWalletPickerUi(event.target)) event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          if (isPortaledWalletPickerUi(event.target)) event.preventDefault();
+        }}
+      >
         <DialogHeader className="pb-4 pr-8">
           {showGetStarted && showWallets && !openToWallets ? (
             <button

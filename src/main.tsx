@@ -13,7 +13,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 import { redirectDevOriginForPrivy } from "@/utils/privyOrigin";
+import { installPeraConnectModalViewportPin } from "@/lib/pinPeraConnectModalViewport";
 
 if (!redirectDevOriginForPrivy()) {
+  installPeraConnectModalViewportPin();
   createRoot(document.getElementById("root")!).render(<App />);
 }

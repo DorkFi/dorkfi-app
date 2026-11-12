@@ -669,3 +669,15 @@
   z-index: 2147483647 !important;
   pointer-events: auto;
 }
+
+/*
+ * Pera mounts its connect sheet on document.body while the wallet dialog is
+ * open. Radix sets pointer-events: none on body, and that value is inherited,
+ * so the launch button would ignore taps. Same treatment as RainbowKit/Privy.
+ */
+#pera-wallet-connect-modal-wrapper,
+#pera-wallet-redirect-modal-wrapper,
+#pera-wallet-sign-txn-modal-wrapper,
+#pera-wallet-sign-txn-toast-wrapper {
+  pointer-events: auto;
+}
