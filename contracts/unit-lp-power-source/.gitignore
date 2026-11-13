@@ -1,0 +1,3 @@
+.venv/
+*.puya.map
+.deployer.mnemonic
