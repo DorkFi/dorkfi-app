@@ -21,6 +21,7 @@ import { ProposalCategory } from "@/types/governanceTypes";
 import { getCategoryId } from "@/constants/governanceConstants";
 import { APP_SPEC as UNITGovernanceAppSpec, PowerSnapshot, PowerSource, PowerMultiplierSnapshot } from "@/clients/UNITGovernanceClient";
 import {
+  assertRegisterablePowerSourceAppId,
   deployedUnitLpPowerAdapters,
   TINYMAN_V2_VALIDATOR_APP_ID,
   UNIT_LP_POWER_SOURCE_SPEC,
@@ -1662,6 +1663,8 @@ export const addPowerSource = async (
   networkId?: NetworkId
 ): Promise<{ success: boolean; txns?: string[]; error?: string }> => {
   try {
+    assertRegisterablePowerSourceAppId(params.powerSourceId);
+
     const networkConfig = networkId
       ? getNetworkConfig(networkId)
       : getCurrentNetworkConfig();
