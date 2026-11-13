@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   CURATED_LIQUIDITY_POOLS,
+  countPoolsByBaseTokenFilter,
+  formatLiquidityFeeLabel,
+  getDexAddLiquidityUrl,
+  groupLiquidityPoolCards,
   pairHasPoolsPageLendingPosition,
   pairHasUsdcLpCollateralLendingMarket,
   pairHasUsdcLpLendingMarket,
@@ -139,6 +143,45 @@ describe("resolveWadLendingPoolIdsForFilter", () => {
     expect(resolveWadLendingPoolIdsForFilter(NETWORK, wadPairs)).toEqual([
       POOL_E,
     ]);
+  });
+});
+
+describe("Pact ALGO/WAD card", () => {
+  it("groups the two fee tiers into one card and keeps Tinyman pools alone", () => {
+    const cards = groupLiquidityPoolCards(CURATED_LIQUIDITY_POOLS);
+    const pact = cards.find((card) => card.id === "pact-algo-wad");
+    expect(pact?.pairs.map((pair) => pair.id)).toEqual([
+      "pact-algo-wad-10bps",
+      "pact-algo-wad-100bps",
+    ]);
+    expect(pact?.pairs.map((pair) => pair.feeBps)).toEqual([10, 100]);
+    expect(pact?.pairs.every((pair) => pair.lpContractId === 0)).toBe(true);
+    expect(cards.filter((card) => card.pairs.length > 1)).toHaveLength(1);
+  });
+
+  it("counts the two tiers as one WAD card", () => {
+    const counts = countPoolsByBaseTokenFilter(
+      CURATED_LIQUIDITY_POOLS.filter((pair) => pair.networkId === NETWORK)
+    );
+    const wadPairs = CURATED_LIQUIDITY_POOLS.filter(
+      (pair) =>
+        pair.networkId === NETWORK &&
+        (pair.asset1Id === 3334160924 || pair.asset2Id === 3334160924)
+    );
+    expect(wadPairs).toHaveLength(7);
+    expect(counts.wad).toBe(6);
+    expect(counts.all).toBe(countPoolsByBaseTokenFilter(CURATED_LIQUIDITY_POOLS).all);
+  });
+
+  it("links each tier to its Pact pool", () => {
+    expect(formatLiquidityFeeLabel(10)).toBe("0.10%");
+    expect(formatLiquidityFeeLabel(100)).toBe("1.00%");
+    expect(getDexAddLiquidityUrl("pact", "3733127886")).toBe(
+      "https://app.pact.fi/pool/3733127886"
+    );
+    expect(getDexAddLiquidityUrl("pact", "3738225809")).toBe(
+      "https://app.pact.fi/pool/3738225809"
+    );
   });
 });
 

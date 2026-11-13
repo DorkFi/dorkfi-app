@@ -7,6 +7,7 @@ import Footer from "@/components/Footer";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import { H1, Body } from "@/components/ui/Typography";
 import LiquidityPoolCardContainer from "@/components/pools/LiquidityPoolCardContainer";
+import PactFeeTierCardContainer from "@/components/pools/PactFeeTierCardContainer";
 import PoolsLendingGlobalSummary from "@/components/pools/PoolsLendingGlobalSummary";
 import PoolsWadBorrowSection from "@/components/pools/PoolsWadBorrowSection";
 import PoolsTokenFilter from "@/components/pools/PoolsTokenFilter";
@@ -14,6 +15,7 @@ import {
   countPoolsByBaseTokenFilter,
   getCuratedLiquidityPoolsForNetwork,
   getPoolBaseTokenFilterAssetId,
+  groupLiquidityPoolCards,
   poolMatchesBaseTokenFilter,
   POOL_BASE_TOKEN_FILTERS,
   resolvePoolCWadMarket,
@@ -53,6 +55,10 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
     return pairs.filter((pair) => poolMatchesBaseTokenFilter(pair, filterAssetId));
   }, [pairs, tokenFilter]);
   const orderedPairs = useLiquidityPoolsOrderedByApr(filteredPairs);
+  const poolCards = useMemo(
+    () => groupLiquidityPoolCards(orderedPairs),
+    [orderedPairs]
+  );
   const invalidatePools = useInvalidateLiquidityPools(pairs);
   const tinymanSupported = tinymanNetworkFromNetworkId(currentNetwork) != null;
   const filterSymbol =
@@ -187,19 +193,27 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
                 onBorrowSuccess={invalidateLendingSummary}
               />
             ) : null}
-            {orderedPairs.length === 0 ? (
+            {poolCards.length === 0 ? (
               <div className="rounded-xl border px-4 py-6 text-center text-muted-foreground">
                 No pools match this token filter.
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {orderedPairs.map((pair) => (
-                  <LiquidityPoolCardContainer
-                    key={pair.id}
-                    pair={pair}
-                    onLendingSuccess={invalidateLendingSummary}
-                  />
-                ))}
+                {poolCards.map((card) =>
+                  card.pairs.some((pair) => pair.platform === "pact") ? (
+                    <PactFeeTierCardContainer
+                      key={card.id}
+                      pairs={card.pairs}
+                      onLendingSuccess={invalidateLendingSummary}
+                    />
+                  ) : (
+                    <LiquidityPoolCardContainer
+                      key={card.id}
+                      pair={card.pairs[0]}
+                      onLendingSuccess={invalidateLendingSummary}
+                    />
+                  )
+                )}
               </div>
             )}
           </>
